@@ -1,4 +1,10 @@
+node_modules
 lib-cov
+build
+pids
+logs
+results
+*~
 *.seed
 *.log
 *.csv
@@ -6,10 +12,3 @@ lib-cov
 *.out
 *.pid
 *.gz
-
-pids
-logs
-results
-
-npm-debug.log
-node_modules

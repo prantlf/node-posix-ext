@@ -1,0 +1,31 @@
+{
+  "name": "posix-ext",
+  "version": "0.1.0",
+  "description": "A drop-in replacement for the Node.js modules process, fs and posix providing their POSIX functionality on both POSIX and Windows platforms.",
+  "homepage": "https://github.com/prantlf/node-posix-ext/",
+  "author": {
+    "name": "Ferdinand Prantl",
+    "email": "prantlf@gmail.com",
+    "web": "http://prantl.tk",
+    "twitter": "prantlf"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/prantlf/node-posix-ext.git"
+  },
+  "bugs": "https://github.com/prantlf/node-posix-ext/issues",
+  "keywords": [
+    "process", "fs", "posix", "filesystem",
+    "getuid", "getgid", "getgroups",
+    "stat", "lstat", "fstat", "chown", "lchown", "fchown"
+  ],
+  "main": "./lib/posix-ext",
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "scripts": {
+    "postinstall": "node install-dependencies.js",
+    "test": "node test/test-all.js"
+  }
+}
