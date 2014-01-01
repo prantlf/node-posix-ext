@@ -3,7 +3,7 @@
 A drop-in replacement for the Node.js modules process, fs and posix
 providing their POSIX functionality on both POSIX and Windows platforms.
 
-[![Build Status](https://secure.travis-ci.org/prantlf/node-posixﬂext.png)](http://travis-ci.org/prantlf/node-posix-ext)
+[![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext)
 
 ## Motivation
 
