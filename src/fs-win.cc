@@ -318,7 +318,7 @@ static int getown_sync(LPCSTR path, LPSTR *uid, LPSTR *gid) {
 
   PSID usid = NULL, gsid = NULL;
   LocalMem<PSECURITY_DESCRIPTOR> sd;
-  DWORD error = GetNamedSecurityInfo(path, SE_FILE_OBJECT,
+  DWORD error = GetNamedSecurityInfo((LPSTR) path, SE_FILE_OBJECT,
     OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
     &usid, &gsid, NULL, NULL, &sd);
   if (error != ERROR_SUCCESS) {
