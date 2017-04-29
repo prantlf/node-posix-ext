@@ -1,5 +1,7 @@
 # node-posix-ext
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/prantlf/node-posix-ext.svg)](https://greenkeeper.io/)
+
 A drop-in replacement for the Node.js modules process, fs and posix
 providing their POSIX functionality on both POSIX and Windows platforms.
 
