@@ -16,13 +16,13 @@ gid = posix.getgrnam(gname).gid;
 
 function setUp() {
   fs.mkdirSync(space);
-  var fd = fs.openSync(space + "/file", "w", "0666");
+  var fd = fs.openSync(space + "/file", "w");
   fs.closeSync(fd);
   var fpath = fs.realpathSync(space + "/file");
   fs.symlinkSync(fpath, space + "/file_link");
   fs.chownSync(space + "/file", uid, gid);
   fs.mkdirSync(space + "/directory");
-  fpath = fs.realpathSync(space + "/directory", "0777");
+  fpath = fs.realpathSync(space + "/directory");
   fs.symlinkSync(fpath, space + "/directory_link");
   fs.chownSync(space + "/directory", uid, gid);
 }
