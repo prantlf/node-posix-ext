@@ -14,6 +14,11 @@ node_js:
   - "6"
   - "7"
   - "8"
-before_install:
-  - npm install -g npm
-  - npm install -g node-gyp
+env:
+  - CXX=g++-4.8
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-4.8
