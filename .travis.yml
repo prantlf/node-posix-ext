@@ -6,8 +6,6 @@ cache:
 notifications:
   email: true
 node_js:
-  - "0.8"
-  - "0.9"
   - "0.10"
   - "0.11"
   - "0.12"
@@ -17,6 +15,5 @@ node_js:
   - "7"
   - "8"
 before_install:
+  - npm install -g npm
   - npm install -g node-gyp
-before_script:
-  - npm install -g grunt-cli

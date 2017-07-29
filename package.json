@@ -23,7 +23,7 @@
   ],
   "main": "./lib/posix-ext",
   "engines": {
-    "node": ">= 0.8.0"
+    "node": ">= 0.10.0"
   },
   "scripts": {
     "postinstall": "node install-dependencies.js",
