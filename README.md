@@ -215,7 +215,7 @@ Output of the `example/example-whoami.js` run on Windows:
 
 ## Build
 
-Make sure that you have [NodeJS] >= 0.10 and the global NPM module `node-gyp`
+Make sure that you have [NodeJS] >= 0.8 and the global NPM module `node-gyp`
 installed. Clone the Github repository to a local directory and enter it.
 Install the package dependencies, build and test.
 

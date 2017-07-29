@@ -8,7 +8,12 @@ var assert = require('assert'),
 // the process object is exposed and the getgroups method, which is
 // originally available only on POSIX, is available on Windows too
 assert.ok(process);
-assert.ok(process.getgroups);
+if (typeof process.getgroups === "undefined") {
+  console.warn("  process.getgroups not available; ignoring the tests");
+  console.warn("  (running node.js < 0.10 on a POSIX platform?)");
+  return;
+}
+ assert.ok(process.getgroups);
 // check that the list of groups of the calling process is not empty
 groups = process.getgroups();
 assert.ok(Array.isArray(groups));

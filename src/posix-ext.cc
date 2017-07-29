@@ -8,7 +8,7 @@ using namespace v8;
 // the add-on module-initializing entry point function
 extern "C" void init(Handle<Object> target)
 {
-#if NODE_MODULE_VERSION > NODE_0_10_MODULE_VERSION
+#if (NODE_MAJOR_VERSION > 0) || (NODE_MINOR_VERSION > 10)
   HandleScope scope(Isolate::GetCurrent());
 #else
   HandleScope scope;
