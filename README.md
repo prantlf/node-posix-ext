@@ -3,7 +3,9 @@
 A drop-in replacement for the Node.js modules process, fs and posix
 providing their POSIX functionality on both POSIX and Windows platforms.
 
-[![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext)
+[![NPM version](https://badge.fury.io/js/node-posix-ext.png)](http://badge.fury.io/js/node-posix-ext) ![Bower version](https://img.shields.io/bower/v/node-posix-ext.svg) [![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext) [![Dependency Status](https://david-dm.org/prantlf/node-posix-ext.svg)](https://david-dm.org/prantlf/node-posix-ext) [![devDependency Status](https://david-dm.org/prantlf/node-posix-ext/dev-status.svg)](https://david-dm.org/prantlf/node-posix-ext#info=devDependencies)
+
+[![NPM Downloads](https://nodei.co/npm/node-posix-ext.png?downloads=true&downloadRank=true&stars=true)](https://www.npmjs.com/package/node-posix-ext)[![NPM](https://nodei.co/npm-dl/node-posix-ext.png?months=6&height=3)](https://nodei.co/npm/node-posix-ext/)
 
 ## Motivation
 
@@ -38,23 +40,140 @@ SIDs on windows, while defaulting to the original functionality in POSIX:
     fs:      stat, lstat, fstat, chown, lchown, fchown
     posix:   getpwnam, getpwuid, getgrnam, getgrgid
 
-## Usage
+## Installation
 
 The installation can be performed either from the GitHub sources
-or from the node module repository:
+or from the NPM repository:
 
     npm install posix-ext
 
-This module provides patched objects with the modified functionality
-on Windows and the built-in on POSIX:
+## Usage
 
-    var posix = require("../lib/posix-ext"),
+This module provides patched objects for the `process`, `fs` and `posix`
+modules, adding functionality on Windows and reusing the built-in one
+on POSIX:
+
+    var posix = require('../lib/posix-ext'),
         process = posix.process,
         fs = posix.fs;
 
-## Example
+## Process Calls on Windows
 
-Ouptut of the `example/example-whoami.js` run on Linux:
+### process.getgid()
+
+Returns the current process's group SID as string.
+
+    // Prints "GID: S-1-5-32-513"
+    console.log('GID:', process.getgid());
+
+### process.getuid()
+
+Returns the current process's user SID as string.
+
+    // Prints "UID: S-1-5-21-3974217899-2981595321-1938156221-1011"
+    console.log('UID:', process.getuid());
+
+### process.getgroups()
+
+Returns supplementary groups of the current process as an array of strings
+with the group SIDs.
+
+    console.log('Groups:', process.getgroups());
+
+## POSIX Calls on Windows
+
+### posix.getgrnam(group)
+
+Gets the group information structured as a POSIX group database entry for
+the given group. `group` can be specified as a string with a group name.
+
+    var util = require('util');
+    util.inspect(posix.getgrnam('NOTO\\Users'));
+
+A sample output of the code above:
+
+    { name: 'NOTO\\Users', passwd: 'x',
+      gid: 'S-1-5-21-3974217899-2981595321-1938156221-513',
+      members:
+       [ 'NT AUTHORITY\\INTERACTIVE',
+         'NT AUTHORITY\\Authenticated Users',
+         'NOTO\\prantlf' ] }
+
+### posix.getgruid(user)
+
+Gets the group information structured as a POSIX group database entry for
+the given group. `group` can be specified as a string with a SID.
+
+    var group = posix.getgrnam('S-1-5-21-3974217899-2981595321-1938156221-513');
+
+See `getgrnam` for more information.
+
+### posix.getpwnam(user)
+
+Gets the user information structured as a POSIX user database entry for
+the given user. `user` can be specified as a string with a user name.
+
+    var util = require('util');
+    util.inspect(posix.getpwnam('NOTO\\prantlf'));
+
+A sample output of the code above:
+
+    { name: 'NOTO\\prantlf', passwd: 'x',
+      uid: 'S-1-5-21-3974217899-2981595321-1938156221-1011',
+      gid: 'S-1-5-32-513',
+      gecos: 'Ferdinand Prantl',
+      shell: '', dir: '' }
+
+### posix.getpwuid(user)
+
+Gets the user information structured as a POSIX user database entry for
+the given user. `user` can be specified as a string with a SID.
+
+    var user = posix.getpwnam('S-1-5-21-3974217899-2981595321-1938156221-1011');
+
+See `getpwnam` for more information.
+
+## FileSystem Calls on Windows
+
+Every method as also a synchronous alternative. Their names end with the
+"Sync" suffix and they lack the last callback argument. If they succeed,
+they return their result, instead of passing it to the second callback
+argument. If they fail, they throw the error, instead of passing it
+to the first callback argument.
+
+### fs.stat(path, callback)
+
+Refers to users and groups in the output `uid` and `gid` properties by their
+SIDs (strings). See the original implementation for more infoemation.
+
+### fs.lstat(path, callback)
+
+Refers to users and groups in the output `uid` and `gid` properties by their
+SIDs (strings). See the original implementation for more infoemation.
+
+### fs.fstat(fd, callback)
+
+Refers to users and groups in the output `uid` and `gid` properties by their
+SIDs (strings). See the original implementation for more infoemation.
+
+### fs.chown(path, uid, gid, callback)
+
+Refers to users and groups in the input `uid` and `gid` arguments by their
+SIDs (strings). See the original implementation for more infoemation.
+
+### fs.lchown(path, uig, gid, callback)
+
+Refers to users and groups in the input `uid` and `gid` arguments by their
+SIDs (strings). See the original implementation for more infoemation.
+
+### fs.fchown(fd, uid, gid, callback)
+
+Refers to users and groups in the input `uid` and `gid` arguments by their
+SIDs (strings). See the original implementation for more infoemation.
+
+## Script Example
+
+Output of the `example/example-whoami.js` run on Linux:
 
     $ node node_modules/posix-ext/example/example-whoami.js
     user:   { name: 'prantlf', passwd: 'x',
@@ -71,7 +190,7 @@ Ouptut of the `example/example-whoami.js` run on Linux:
       'sambashare (124)',
       'prantlf (1000)' ]
 
-Ouptut of the `example/example-whoami.js` run on Windows:
+Output of the `example/example-whoami.js` run on Windows:
 
     > node node_modules\posix-ext\example\example-whoami.js
     user:   { name: 'NOTO\\prantlf', passwd: 'x',
@@ -93,3 +212,56 @@ Ouptut of the `example/example-whoami.js` run on Windows:
       'NT AUTHORITY\\Authenticated Users (S-1-5-11)',
       'LOCAL (S-1-2-0)',
       'NT AUTHORITY\\NTLM Authentication (S-1-5-64-10)' ]
+
+## Build
+
+Make sure that you have [NodeJS] >= 0.10 and the global NPM module `node-gyp`
+installed. Clone the Github repository to a local directory and enter it.
+Install the package dependencies, build and test.
+
+```shell
+git clone https://github.com/prantlf/node-posix-ext.git
+cd node-posix-ext
+npm install
+node-gyp configure
+node-gyp build
+npm test
+```
+
+## Contributing
+
+In lieu of a formal styleguide, take care to maintain the existing coding
+style. Add unit tests for any new or changed functionality.
+
+First fork this repository and clone your fork locally instead of cloning
+the original. See the "Build" chapter above for more details about how to
+clone it and install the build dependencies.
+
+Before you commit, check if tests succeed:
+
+```shell
+node-gyp configure
+node-gyp build
+npm test
+```
+
+Commit your changes to a separtate branch, so that you can create a pull
+request for it:
+
+```shell
+git checkout -b <branch name>
+git commit -a
+git push origin <branch name>
+```
+
+## Release History
+
+ * 2017-07-29   v0.1.2   Fix building for Node.js versions >= 0.12 and <= 8
+ * 2014-01-20   v0.1.1   Fix building with MSVC 2008
+ * 2014-01-02   v0.1.0   Initial release
+
+## License
+
+Copyright (c) 2013-2017 Ferdinand Prantl
+
+Licensed under the MIT license.
