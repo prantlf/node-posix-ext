@@ -1,14 +1,5 @@
 .git*
-build/
-*~
-c4che
-*#*
-.DS_Store
-.npmignore
 *.log
-*.o
-node_modules/
-lib/*~
-.*~
-.*
-*.gz
+build
+node_modules
+tmp-test-fs
