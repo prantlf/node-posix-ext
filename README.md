@@ -1,13 +1,11 @@
 # node-posix-ext
 
-[![Greenkeeper badge](https://badges.greenkeeper.io/prantlf/node-posix-ext.svg)](https://greenkeeper.io/)
-
 A drop-in replacement for the Node.js modules process, fs and posix
 providing their POSIX functionality on both POSIX and Windows platforms.
 
-[![NPM version](https://badge.fury.io/js/node-posix-ext.png)](http://badge.fury.io/js/node-posix-ext) ![Bower version](https://img.shields.io/bower/v/node-posix-ext.svg) [![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext) [![Dependency Status](https://david-dm.org/prantlf/node-posix-ext.svg)](https://david-dm.org/prantlf/node-posix-ext) [![devDependency Status](https://david-dm.org/prantlf/node-posix-ext/dev-status.svg)](https://david-dm.org/prantlf/node-posix-ext#info=devDependencies)
+[![NPM version](https://badge.fury.io/js/node-posix-ext.png)](http://badge.fury.io/js/node-posix-ext) ![Bower version](https://img.shields.io/bower/v/node-posix-ext.svg) [![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext) [![Dependency Status](https://david-dm.org/prantlf/node-posix-ext.svg)](https://david-dm.org/prantlf/node-posix-ext) [![devDependency Status](https://david-dm.org/prantlf/node-posix-ext/dev-status.svg)](https://david-dm.org/prantlf/node-posix-ext#info=devDependencies) [![Greenkeeper badge](https://badges.greenkeeper.io/prantlf/node-posix-ext.svg)](https://greenkeeper.io/)
 
-[![NPM Downloads](https://nodei.co/npm/node-posix-ext.png?downloads=true&downloadRank=true&stars=true)](https://www.npmjs.com/package/node-posix-ext)[![NPM](https://nodei.co/npm-dl/node-posix-ext.png?months=6&height=3)](https://nodei.co/npm/node-posix-ext/)
+[![NPM Downloads](https://nodei.co/npm/posix-ext.png?downloads=true&downloadRank=true&stars=true)](https://www.npmjs.com/package/posix-ext)[![NPM](https://nodei.co/npm-dl/posix-ext.png?months=6&height=3)](https://nodei.co/npm/posix-ext/)
 
 ## Motivation
 
@@ -44,10 +42,19 @@ SIDs on windows, while defaulting to the original functionality in POSIX:
 
 ## Installation
 
-The installation can be performed either from the GitHub sources
-or from the NPM repository:
+The installation of this module can be performed either from the GitHub
+sources or simply from the NPM repository:
 
     npm install posix-ext
+
+**For Windows users**: you will need a C++ compiler capable of compiling
+native Node.js modules and Python 2.x, *before you install this module*.
+If you do not have those, you can install them easily by installing the
+NPM module [windows-build-tools](https://github.com/felixrieseberg/windows-build-tools)
+globaly. Execute the following command in the PowerShell Console or Command
+Prompt with elevated permissions ("Run as Administrator"`):
+
+    npm install --global --production windows-build-tools
 
 ## Usage
 
@@ -258,6 +265,7 @@ git push origin <branch name>
 
 ## Release History
 
+ * 2017-08-06   v0.2.0   Fix building for recent Node.js versions on Windows
  * 2017-07-29   v0.1.2   Fix building for Node.js versions >= 0.12 and <= 8
  * 2014-01-20   v0.1.1   Fix building with MSVC 2008
  * 2014-01-02   v0.1.0   Initial release

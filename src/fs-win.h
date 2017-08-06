@@ -1,16 +1,12 @@
 #ifndef FS_WIN_H
 #define FS_WIN_H
 
-#include <node.h>
-#include <v8.h>
+#include <nan.h>
 
 namespace fs_win {
 
-using namespace node;
-using namespace v8;
-
 // to be called during the node add-on initialization
-void init(Handle<Object> target);
+NAN_MODULE_INIT(init);
 
 } // namespace fs_win
 

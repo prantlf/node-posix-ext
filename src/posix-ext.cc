@@ -2,19 +2,9 @@
 #include "fs-win.h"
 #include "posix-win.h"
 
-using namespace node;
-using namespace v8;
-
 // the add-on module-initializing entry point function
-extern "C" void init(Handle<Object> target)
+NAN_MODULE_INIT(init)
 {
-#if (NODE_MAJOR_VERSION > 0) || (NODE_MINOR_VERSION > 10)
-  HandleScope scope(Isolate::GetCurrent());
-#else
-  HandleScope scope;
-#endif
-
-  // initialize all sub-packages of this add-on module
   process_win::init(target);
   fs_win::init(target);
   posix_win::init(target);

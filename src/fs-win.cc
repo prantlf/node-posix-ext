@@ -1,5 +1,3 @@
-#ifdef _WIN32
-
 #include "fs-win.h"
 #include "autores.h"
 #include "winwrap.h"
@@ -15,37 +13,52 @@
 //
 // method implementation pattern:
 //
-// register method_impl as exports.method
+// register method as exports.method
+// method {
+//   if sync:  call method_impl, return convert_result
+//   if async: queue worker
+// }
 // method_impl {
-//   if sync:  call method_sync, return convert_result
-//   if async: queue method_async with after_async
+//   perform native code
 // }
-// method_async {
-//   call method_sync
-// }
-// after_async {
-//   for OPERATION_METHOD: return convert_result to callback
+// worker {
+//   execute method_impl, return convert_result to callback
 // }
 
 namespace fs_win {
 
-using namespace node;
-using namespace v8;
+using node::WinapiErrnoException;
+using v8::Local;
+using v8::Function;
+using v8::Object;
+using v8::Array;
+using v8::Value;
+using v8::String;
+using Nan::AsyncQueueWorker;
+using Nan::AsyncWorker;
+using Nan::Callback;
+using Nan::HandleScope;
+using Nan::ThrowError;
+using Nan::ThrowTypeError;
+using Nan::New;
+using Nan::Null;
+using Nan::Undefined;
+using Nan::EmptyString;
+using Nan::Set;
 using namespace autores;
 
 // helpers for returning errors from native methods
-#define THROW_TYPE_ERROR(msg) \
-  ThrowException(Exception::TypeError(String::New(msg)))
-#define LAST_WINAPI_ERROR \
-  ((int) GetLastError())
-#define THROW_WINAPI_ERROR(err) \
-  ThrowException(WinapiErrnoException(err))
-#define THROW_LAST_WINAPI_ERROR \
-  THROW_WINAPI_ERROR(LAST_WINAPI_ERROR)
-
-// members names of result object literals
-static Persistent<String> uid_symbol;
-static Persistent<String> gid_symbol;
+#if (NODE_MAJOR_VERSION > 0) || (NODE_MINOR_VERSION > 10)
+  #define WinapiError(error) \
+    WinapiErrnoException(v8::Isolate::GetCurrent(), error)
+#else
+  #define WinapiError(error) \
+    WinapiErrnoException(error)
+#endif
+#define ThrowWinapiError(error) \
+  ThrowError(WinapiError(error))
+#define ThrowLastWinapiError() \
+  ThrowWinapiError(GetLastError())
 
 // ------------------------------------------------
 // internal functions to support the native exports
@@ -104,10 +117,10 @@ class TakingOwhership {
     DWORD Enable() {
       if (OpenProcessToken(GetCurrentProcess(),
           TOKEN_ADJUST_PRIVILEGES, &process) == FALSE)  {
-        return LAST_WINAPI_ERROR;
+        return GetLastError();
       }
       if (SetPrivileges(TRUE) == FALSE) {
-        return LAST_WINAPI_ERROR;
+        return GetLastError();
       }
       enabled = true;
       return ERROR_SUCCESS;
@@ -116,10 +129,10 @@ class TakingOwhership {
     DWORD Disable() {
       if (enabled) {
         if (SetPrivileges(FALSE) == FALSE) {
-          return LAST_WINAPI_ERROR;
+          return GetLastError();
         }
         if (!process.Dispose()) {
-          return LAST_WINAPI_ERROR;
+          return GetLastError();
         }
         enabled = false;
       }
@@ -127,102 +140,23 @@ class TakingOwhership {
     }
 };
 
-// -----------------------------------------
-// support for asynchronous method execution
-
-// codes of exposed native methods
-typedef enum {
-  OPERATION_FGETOWN,
-  OPERATION_GETOWN,
-  OPERATION_FCHOWN,
-  OPERATION_CHOWN
-} operation_t;
-
-// passes input/output parameters between the native method entry point
-// and the worker method doing the work, which is called asynchronously
-struct async_data_t {
-  uv_work_t request;
-  Persistent<Function> callback;
-  DWORD error;
-
-  operation_t operation;
-  int fd;
-  HeapMem<LPSTR> path;
-  LocalMem<LPSTR> susid, sgsid;
-
-  async_data_t(Local<Function> lcallback) {
-    if (!lcallback.IsEmpty()) {
-      callback = Persistent<Function>::New(lcallback);
-    }
-    request.data = this;
-  }
-
-  ~async_data_t() {
-    if (!callback.IsEmpty()) {
-      callback.Dispose();
-    }
-  }
-};
-
 // makes a JavaScript result object literal of user and group SIDs
-static Local<Object> convert_ownership(LPSTR uid, LPSTR gid) {
-  Local<Object> result = Object::New();
+static Local<Value> convert_ownership(LPSTR uid, LPSTR gid) {
+  Local<Object> result = New<Object>();
   if (!result.IsEmpty()) {
-    result->Set(uid_symbol, String::New(uid));
-    result->Set(gid_symbol, String::New(gid));
+    Set(result, New<String>("uid").ToLocalChecked(),
+      New<String>(uid).ToLocalChecked());
+    Set(result, New<String>("gid").ToLocalChecked(),
+      New<String>(gid).ToLocalChecked());
   }
   return result;
-}
-
-// called after an asynchronously called method (method_sync) has
-// finished to convert the results to JavaScript objects and pass
-// them to JavaScript callback
-static void after_async(uv_work_t * req) {
-  assert(req != NULL);
-  HandleScope scope;
-
-  Local<Value> argv[2];
-  int argc = 1;
-
-  async_data_t * async_data = static_cast<async_data_t *>(req->data);
-  if (async_data->error != ERROR_SUCCESS) {
-    argv[0] = WinapiErrnoException(async_data->error);
-  } else {
-    // in case of success, make the first argument (error) null
-    argv[0] = Local<Value>::New(Null());
-    // in case of success, populate the second and other arguments
-    switch (async_data->operation) {
-      case OPERATION_FGETOWN:
-      case OPERATION_GETOWN: {
-        argv[1] = convert_ownership(
-          async_data->susid, async_data->sgsid);
-        argc = 2;
-        break;
-      }
-      case OPERATION_FCHOWN:
-      case OPERATION_CHOWN:
-        break;
-      default:
-        assert(FALSE && "Unknown operation");
-    }
-  }
-
-  // pass the results to the external callback
-  TryCatch tryCatch;
-  async_data->callback->Call(Context::GetCurrent()->Global(), argc, argv);
-  if (tryCatch.HasCaught()) {
-    FatalException(tryCatch);
-  }
-
-  async_data->callback.Dispose();
-  delete async_data;
 }
 
 // -------------------------------------------------------
 // fgetown - gets the file or directory ownership as SIDs:
 // { uid, gid }  fgetown( fd, [callback] )
 
-static int fgetown_sync(int fd, LPSTR *uid, LPSTR *gid) {
+static int fgetown_impl(int fd, LPSTR *uid, LPSTR *gid) {
   assert(uid != NULL);
   assert(gid != NULL);
 
@@ -239,12 +173,12 @@ static int fgetown_sync(int fd, LPSTR *uid, LPSTR *gid) {
 
   LocalMem<LPSTR> susid;
   if (ConvertSidToStringSid(usid, &susid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   LocalMem<LPSTR> sgsid;
   if (ConvertSidToStringSid(gsid, &sgsid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   *uid = susid.Detach();
@@ -253,57 +187,80 @@ static int fgetown_sync(int fd, LPSTR *uid, LPSTR *gid) {
   return ERROR_SUCCESS;
 }
 
-// passes the execution to fgetown_sync; the results will be processed
-// by after_async
-static void fgetown_async(uv_work_t * req) {
-  assert(req != NULL);
-  async_data_t * async_data = static_cast<async_data_t *>(req->data);
-  async_data->error = fgetown_sync(async_data->fd,
-    &async_data->susid, &async_data->sgsid);
-}
+// passes input/output parameters between the native method entry point
+// and the worker method doing the work, which is called asynchronously
+class fgetown_worker : public AsyncWorker {
+  public:
+    fgetown_worker(Callback * callback, int fd)
+    : AsyncWorker(callback), fd(fd) {}
+
+    ~fgetown_worker() {}
+
+  // passes the execution to fgetown_impl
+  void Execute() {
+    error = fgetown_impl(fd, &susid, &sgsid);
+  }
+
+  // called after an asynchronously called method (method_impl) has
+  // finished to convert the results to JavaScript objects and pass
+  // them to JavaScript callback
+  void HandleOKCallback() {
+    HandleScope scope;
+    if (error != ERROR_SUCCESS) {
+      // pass the error to the external callback
+      Local<Value> argv[] = {
+        // in case of error, make the first argument an error object
+        WinapiError(error)
+      };
+      callback->Call(1, argv);
+    } else {
+      // pass the results to the external callback
+      Local<Value> argv[] = {
+        // in case of success, make the first argument (error) null
+        Null(),
+        // in case of success, populate the second and other arguments
+        convert_ownership(susid, sgsid)
+      };
+      callback->Call(2, argv);
+    }
+  }
+
+  private:
+    DWORD error;
+    int fd;
+    LocalMem<LPSTR> susid, sgsid;
+};
 
 // the native entry point for the exposed fgetown function
-static Handle<Value> fgetown_impl(Arguments const & args) {
-  HandleScope scope;
-
-  int argc = args.Length();
+NAN_METHOD(fgetown) {
+  int argc = info.Length();
   if (argc < 1)
-    return THROW_TYPE_ERROR("fd required");
+    return ThrowTypeError("fd required");
   if (argc > 2)
-    return THROW_TYPE_ERROR("too many arguments");
-  if (!args[0]->IsInt32())
-    return THROW_TYPE_ERROR("fd must be an int");
-  if (argc > 1 && !args[1]->IsFunction())
-    return THROW_TYPE_ERROR("callback must be a function");
+    return ThrowTypeError("too many arguments");
+  if (!info[0]->IsInt32())
+    return ThrowTypeError("fd must be an int");
+  if (argc > 1 && !info[1]->IsFunction())
+    return ThrowTypeError("callback must be a function");
 
-  int fd = args[0]->Int32Value();
+  int fd = info[0]->Int32Value();
   
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
-  if (!args[1]->IsFunction()) {
+  if (!info[1]->IsFunction()) {
+    HandleScope scope;
     LocalMem<LPSTR> susid, sgsid;
-    DWORD error = fgetown_sync(fd, &susid, &sgsid);
-    if (error != ERROR_SUCCESS) {
-      return THROW_WINAPI_ERROR(error);
-    }
-    Local<Object> result = convert_ownership(susid, sgsid);
-    return scope.Close(result);
+    DWORD error = fgetown_impl(fd, &susid, &sgsid);
+    if (error != ERROR_SUCCESS)
+      return ThrowWinapiError(error);
+    return info.GetReturnValue().Set(convert_ownership(susid, sgsid));
   }
 
-  // prepare parameters for the method_sync to be called later
-  // from the method_async called from the worker thread
-  CppObj<async_data_t *> async_data = new async_data_t(
-    Local<Function>::Cast(args[1]));
-  async_data->operation = OPERATION_FGETOWN;
-  async_data->fd = fd;
-
-  // queue the method_async to be called when posibble and
-  // after_async to send its result to the external callback
-  uv_queue_work(uv_default_loop(), &async_data->request,
-    fgetown_async, (uv_after_work_cb) after_async);
-
-  async_data.Detach();
-  return Undefined();
+  // prepare parameters for the method_impl to be called later;
+  // queue the worker to be called when posibble and send its
+  // result to the external callback
+  Callback * callback = new Callback(info[1].As<Function>());
+  AsyncQueueWorker(new fgetown_worker(callback, fd));
 }
 
 // ------------------------------------------------------
@@ -311,7 +268,7 @@ static Handle<Value> fgetown_impl(Arguments const & args) {
 // { uid, gid }  getown( path, [callback] )
 
 // gets the file ownership (uid and gid) for the file path
-static int getown_sync(LPCSTR path, LPSTR *uid, LPSTR *gid) {
+static int getown_impl(LPCSTR path, LPSTR *uid, LPSTR *gid) {
   assert(path != NULL);
   assert(uid != NULL);
   assert(gid != NULL);
@@ -327,12 +284,12 @@ static int getown_sync(LPCSTR path, LPSTR *uid, LPSTR *gid) {
 
   LocalMem<LPSTR> susid;
   if (ConvertSidToStringSid(usid, &susid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   LocalMem<LPSTR> sgsid;
   if (ConvertSidToStringSid(gsid, &sgsid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   *uid = susid.Detach();
@@ -341,60 +298,84 @@ static int getown_sync(LPCSTR path, LPSTR *uid, LPSTR *gid) {
   return ERROR_SUCCESS;
 }
 
-// passes the execution to getown_sync; the results will be processed
-// by after_async
-static void getown_async(uv_work_t * req) {
-  assert(req != NULL);
-  async_data_t * async_data = static_cast<async_data_t *>(req->data);
-  async_data->error = getown_sync(async_data->path,
-    &async_data->susid, &async_data->sgsid);
-}
+// passes input/output parameters between the native method entry point
+// and the worker method doing the work, which is called asynchronously
+class getown_worker : public AsyncWorker {
+  public:
+    getown_worker(Callback * callback, LPSTR name) : AsyncWorker(callback) {
+      path = HeapStrDup(HeapBase::ProcessHeap(), name);
+      error = path.IsValid() ? ERROR_SUCCESS : GetLastError();
+    }
+
+    ~getown_worker() {}
+
+  // passes the execution to getown_impl
+  void Execute() {
+    if (error == ERROR_SUCCESS) {
+      error = getown_impl((LPSTR) path, &susid, &sgsid);
+    }
+  }
+
+  // called after an asynchronously called method (method_impl) has
+  // finished to convert the results to JavaScript objects and pass
+  // them to JavaScript callback
+  void HandleOKCallback() {
+    HandleScope scope;
+    if (error != ERROR_SUCCESS) {
+      // pass the error to the external callback
+      Local<Value> argv[] = {
+        // in case of error, make the first argument an error object
+        WinapiError(error)
+      };
+      callback->Call(1, argv);
+    } else {
+      // pass the results to the external callback
+      Local<Value> argv[] = {
+        // in case of success, make the first argument (error) null
+        Null(),
+        // in case of success, populate the second and other arguments
+        convert_ownership(susid, sgsid)
+      };
+      callback->Call(2, argv);
+    }
+  }
+
+  private:
+    DWORD error;
+    HeapMem<LPSTR> path;
+    LocalMem<LPSTR> susid, sgsid;
+};
 
 // the native entry point for the exposed getown function
-static Handle<Value> getown_impl(Arguments const & args) {
-  HandleScope scope;
-
-  int argc = args.Length();
+NAN_METHOD(getown) {
+  int argc = info.Length();
   if (argc < 1)
-    return THROW_TYPE_ERROR("path required");
+    return ThrowTypeError("path required");
   if (argc > 2)
-    return THROW_TYPE_ERROR("too many arguments");
-  if (!args[0]->IsString())
-    return THROW_TYPE_ERROR("path must be a string");
-  if (argc > 1 && !args[1]->IsFunction())
-    return THROW_TYPE_ERROR("callback must be a function");
+    return ThrowTypeError("too many arguments");
+  if (!info[0]->IsString())
+    return ThrowTypeError("path must be a string");
+  if (argc > 1 && !info[1]->IsFunction())
+    return ThrowTypeError("callback must be a function");
 
-  String::Utf8Value path(args[0]->ToString());
+  String::Utf8Value path(info[0]->ToString());
   
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
-  if (!args[1]->IsFunction()) {
+  if (!info[1]->IsFunction()) {
+    HandleScope scope;
     LocalMem<LPSTR> susid, sgsid;
-    DWORD error = getown_sync(*path, &susid, &sgsid);
-    if (error != ERROR_SUCCESS) {
-      return THROW_WINAPI_ERROR(error);
-    }
-    Local<Object> result = convert_ownership(susid, sgsid);
-    return scope.Close(result);
+    DWORD error = getown_impl(*path, &susid, &sgsid);
+    if (error != ERROR_SUCCESS)
+      return ThrowWinapiError(error);
+    return info.GetReturnValue().Set(convert_ownership(susid, sgsid));
   }
 
-  // prepare parameters for the method_sync to be called later
-  // from the method_async called from the worker thread
-  CppObj<async_data_t *> async_data = new async_data_t(
-    Local<Function>::Cast(args[1]));
-  async_data->operation = OPERATION_GETOWN;
-  async_data->path = HeapStrDup(HeapBase::ProcessHeap(), *path);
-  if (!async_data->path.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-
-  // queue the method_async to be called when posibble and
-  // after_async to send its result to the external callback
-  uv_queue_work(uv_default_loop(), &async_data->request,
-    getown_async, (uv_after_work_cb) after_async);
-
-  async_data.Detach();
-  return Undefined();
+  // prepare parameters for the method_impl to be called later;
+  // queue the worker to be called when posibble and send its
+  // result to the external callback
+  Callback * callback = new Callback(info[1].As<Function>());
+  AsyncQueueWorker(new getown_worker(callback, *path));
 }
 
 // --------------------------------------------------------
@@ -404,7 +385,7 @@ static Handle<Value> getown_impl(Arguments const & args) {
 // change the ownership (uid and gid) of the file specified by the
 // file descriptor; either uid or gid can be empty ("") to change
 // just one of them
-static int fchown_sync(int fd, LPCSTR uid, LPCSTR gid) {
+static int fchown_impl(int fd, LPCSTR uid, LPCSTR gid) {
   assert(uid != NULL);
   assert(gid != NULL);
 
@@ -414,11 +395,11 @@ static int fchown_sync(int fd, LPCSTR uid, LPCSTR gid) {
   // convert the input SIDs from strings to SID structures
   LocalMem<PSID> usid;
   if (*uid && ConvertStringSidToSid(uid, &usid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
   LocalMem<PSID> gsid;
   if (*gid && ConvertStringSidToSid(gid, &gsid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   // enable taking object ownership in the current process
@@ -434,17 +415,17 @@ static int fchown_sync(int fd, LPCSTR uid, LPCSTR gid) {
     if (SetSecurityInfo(fh, SE_FILE_OBJECT,
           OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
           usid, gsid, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   } else if (*uid) {
     if (SetSecurityInfo(fh, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
           usid, NULL, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   } else if (*gid) {
     if (SetSecurityInfo(fh, SE_FILE_OBJECT, GROUP_SECURITY_INFORMATION,
           NULL, gsid, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   }
 
@@ -458,77 +439,102 @@ static int fchown_sync(int fd, LPCSTR uid, LPCSTR gid) {
   return ERROR_SUCCESS;
 }
 
-// passes the execution to fchown_sync; the results will be processed
-// by after_async
-static void fchown_async(uv_work_t * req) {
-  assert(req != NULL);
-  async_data_t * async_data = static_cast<async_data_t *>(req->data);
-  async_data->error = fchown_sync(async_data->fd,
-    async_data->susid, async_data->sgsid);
-}
+// passes input/output parameters between the native method entry point
+// and the worker method doing the work, which is called asynchronously
+class fchown_worker : public AsyncWorker {
+  public:
+    fchown_worker(Callback * callback, int fd, LPSTR uid, LPSTR gid)
+    : AsyncWorker(callback), fd(fd) {
+      susid = LocalStrDup(uid);
+      error = susid.IsValid() ? ERROR_SUCCESS : GetLastError();
+      if (error == ERROR_SUCCESS) {
+        sgsid = LocalStrDup(gid);
+        error = sgsid.IsValid() ? ERROR_SUCCESS : GetLastError();
+      }
+    }
+
+    ~fchown_worker() {}
+
+  // passes the execution to fchown_impl
+  void Execute() {
+    if (error == ERROR_SUCCESS) {
+      error = fchown_impl(fd, susid, sgsid);
+    }
+  }
+
+  // called after an asynchronously called method (method_impl) has
+  // finished to convert the results to JavaScript objects and pass
+  // them to JavaScript callback
+  void HandleOKCallback() {
+    HandleScope scope;
+    if (error != ERROR_SUCCESS) {
+      // pass the error to the external callback
+      Local<Value> argv[] = {
+        // in case of error, make the first argument an error object
+        WinapiError(error)
+      };
+      callback->Call(1, argv);
+    } else {
+      // pass the results to the external callback
+      Local<Value> argv[] = {
+        // in case of success, make the first argument (error) null
+        Null(),
+        // in case of success, populate the second and other arguments
+        Undefined()
+      };
+      callback->Call(2, argv);
+    }
+  }
+
+  private:
+    DWORD error;
+    int fd;
+    LocalMem<LPSTR> susid, sgsid;
+};
 
 // the native entry point for the exposed fchown function
-static Handle<Value> fchown_impl(Arguments const & args) {
-  HandleScope scope;
-
-  int argc = args.Length();
+NAN_METHOD(fchown) {
+  int argc = info.Length();
   if (argc < 1)
-    return THROW_TYPE_ERROR("fd required");
+    return ThrowTypeError("fd required");
   if (argc > 4)
-    return THROW_TYPE_ERROR("too many arguments");
-  if (!args[0]->IsInt32())
-    return THROW_TYPE_ERROR("fd must be an int");
+    return ThrowTypeError("too many arguments");
+  if (!info[0]->IsInt32())
+    return ThrowTypeError("fd must be an int");
   if (argc < 2)
-    return THROW_TYPE_ERROR("uid required");
-  if (!args[1]->IsString() && !args[1]->IsUndefined())
-    return THROW_TYPE_ERROR("uid must be a string or undefined");
+    return ThrowTypeError("uid required");
+  if (!info[1]->IsString() && !info[1]->IsUndefined())
+    return ThrowTypeError("uid must be a string or undefined");
   if (argc < 3)
-    return THROW_TYPE_ERROR("gid required");
-  if (!args[2]->IsString() && !args[2]->IsUndefined())
-    return THROW_TYPE_ERROR("gid must be a string or undefined");
-  if (argc > 3 && !args[3]->IsFunction())
-    return THROW_TYPE_ERROR("callback must be a function");
-  if (args[1]->IsUndefined() && args[2]->IsUndefined())
-    return THROW_TYPE_ERROR("either uid or gid must be defined");
+    return ThrowTypeError("gid required");
+  if (!info[2]->IsString() && !info[2]->IsUndefined())
+    return ThrowTypeError("gid must be a string or undefined");
+  if (argc > 3 && !info[3]->IsFunction())
+    return ThrowTypeError("callback must be a function");
+  if (info[1]->IsUndefined() && info[2]->IsUndefined())
+    return ThrowTypeError("either uid or gid must be defined");
 
-  int fd = args[0]->Int32Value();
-  String::AsciiValue susid(args[1]->IsString() ?
-    args[1]->ToString() : String::New(""));
-  String::AsciiValue sgsid(args[2]->IsString() ?
-    args[2]->ToString() : String::New(""));
+  int fd = info[0]->Int32Value();
+  String::Utf8Value susid(info[1]->IsString() ?
+    info[1]->ToString() : EmptyString());
+  String::Utf8Value sgsid(info[2]->IsString() ?
+    info[2]->ToString() : EmptyString());
 
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
-  if (!args[3]->IsFunction()) {
-    DWORD error = fchown_sync(fd, *susid, *sgsid);
-    if (error != ERROR_SUCCESS) {
-      return THROW_WINAPI_ERROR(error);
-    }
-    return Undefined();
+  if (!info[3]->IsFunction()) {
+    HandleScope scope;
+    DWORD error = fchown_impl(fd, *susid, *sgsid);
+    if (error != ERROR_SUCCESS)
+      return ThrowWinapiError(error);
+    return info.GetReturnValue().Set(Undefined());
   }
 
-  // prepare parameters for the method_sync to be called later
-  // from the method_async called from the worker thread
-  CppObj<async_data_t *> async_data = new async_data_t(
-    Local<Function>::Cast(args[3]));
-  async_data->operation = OPERATION_FCHOWN;
-  async_data->fd = fd;
-  async_data->susid = LocalStrDup(*sgsid);
-  if (!async_data->susid.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-  async_data->sgsid = LocalStrDup(*susid);
-  if (!async_data->sgsid.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-
-  // queue the method_async to be called when posibble and
-  // after_async to send its result to the external callback
-  uv_queue_work(uv_default_loop(), &async_data->request,
-    fchown_async, (uv_after_work_cb) after_async);
-
-  async_data.Detach();
-  return Undefined();
+  // prepare parameters for the method_impl to be called later;
+  // queue the worker to be called when posibble and send its
+  // result to the external callback
+  Callback * callback = new Callback(info[1].As<Function>());
+  AsyncQueueWorker(new fchown_worker(callback, fd, *susid, *sgsid));
 }
 
 // -------------------------------------------------------
@@ -538,7 +544,7 @@ static Handle<Value> fchown_impl(Arguments const & args) {
 // change the ownership (uid and gid) of the file specified by the
 // file path; either uid or gid can be empty ("") to change
 // just one of them
-static int chown_sync(LPCSTR path, LPCSTR uid, LPCSTR gid) {
+static int chown_impl(LPCSTR path, LPCSTR uid, LPCSTR gid) {
   assert(path != NULL);
   assert(uid != NULL);
   assert(gid != NULL);
@@ -546,11 +552,11 @@ static int chown_sync(LPCSTR path, LPCSTR uid, LPCSTR gid) {
   // convert the input SIDs from strings to SID structures
   LocalMem<PSID> usid;
   if (*uid && ConvertStringSidToSid(uid, &usid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
   LocalMem<PSID> gsid;
   if (*gid && ConvertStringSidToSid(gid, &gsid) == FALSE) {
-    return LAST_WINAPI_ERROR;
+    return GetLastError();
   }
 
   // enable taking object ownership in the current process
@@ -566,19 +572,19 @@ static int chown_sync(LPCSTR path, LPCSTR uid, LPCSTR gid) {
     if (SetNamedSecurityInfo(const_cast<LPSTR>(path), SE_FILE_OBJECT,
           OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
           usid, gsid, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   } else if (*uid) {
     if (SetNamedSecurityInfo(const_cast<LPSTR>(path),
           SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, 
           usid, gsid, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   } else if (*gid) {
     if (SetNamedSecurityInfo(const_cast<LPSTR>(path),
           SE_FILE_OBJECT, GROUP_SECURITY_INFORMATION,
           NULL, gsid, NULL, NULL) != ERROR_SUCCESS) {
-      return LAST_WINAPI_ERROR;
+      return GetLastError();
     }
   }
 
@@ -592,97 +598,116 @@ static int chown_sync(LPCSTR path, LPCSTR uid, LPCSTR gid) {
   return ERROR_SUCCESS;
 }
 
-// passes the execution to chown_sync; the results will be processed
-// by after_async
-static void chown_async(uv_work_t * req) {
-  assert(req != NULL);
-  async_data_t * async_data = static_cast<async_data_t *>(req->data);
-  async_data->error = chown_sync(async_data->path,
-    async_data->susid, async_data->sgsid);
-}
+// passes input/output parameters between the native method entry point
+// and the worker method doing the work, which is called asynchronously
+class chown_worker : public AsyncWorker {
+  public:
+    chown_worker(Callback * callback, LPSTR name, LPSTR uid, LPSTR gid)
+    : AsyncWorker(callback) {
+      path = HeapStrDup(HeapBase::ProcessHeap(), name);
+      error = path.IsValid() ? ERROR_SUCCESS : GetLastError();
+      if (error == ERROR_SUCCESS) {
+        susid = LocalStrDup(uid);
+        error = susid.IsValid() ? ERROR_SUCCESS : GetLastError();
+        if (error == ERROR_SUCCESS) {
+          sgsid = LocalStrDup(gid);
+          error = sgsid.IsValid() ? ERROR_SUCCESS : GetLastError();
+        }
+      }
+    }
+
+    ~chown_worker() {}
+
+  // passes the execution to chown_impl
+  void Execute() {
+    if (error == ERROR_SUCCESS) {
+      error = chown_impl((LPSTR) path, susid, sgsid);
+    }
+  }
+
+  // called after an asynchronously called method (method_impl) has
+  // finished to convert the results to JavaScript objects and pass
+  // them to JavaScript callback
+  void HandleOKCallback() {
+    HandleScope scope;
+    if (error != ERROR_SUCCESS) {
+      // pass the error to the external callback
+      Local<Value> argv[] = {
+        // in case of error, make the first argument an error object
+        WinapiError(error)
+      };
+      callback->Call(1, argv);
+    } else {
+      // pass the results to the external callback
+      Local<Value> argv[] = {
+        // in case of success, make the first argument (error) null
+        Null(),
+        // in case of success, populate the second and other arguments
+        Undefined()
+      };
+      callback->Call(2, argv);
+    }
+  }
+
+  private:
+    DWORD error;
+    HeapMem<LPSTR> path;
+    LocalMem<LPSTR> susid, sgsid;
+};
 
 // the native entry point for the exposed chown function
-static Handle<Value> chown_impl(Arguments const & args) {
-  HandleScope scope;
-
-  int argc = args.Length();
+NAN_METHOD(chown) {
+  int argc = info.Length();
   if (argc < 1)
-    return THROW_TYPE_ERROR("path required");
+    return ThrowTypeError("path required");
   if (argc > 4)
-    return THROW_TYPE_ERROR("too many arguments");
-  if (!args[0]->IsString())
-    return THROW_TYPE_ERROR("path must be a string");
+    return ThrowTypeError("too many arguments");
+  if (!info[0]->IsString())
+    return ThrowTypeError("path must be a string");
   if (argc < 2)
-    return THROW_TYPE_ERROR("uid required");
-  if (!args[1]->IsString() && !args[1]->IsUndefined())
-    return THROW_TYPE_ERROR("uid must be a string or undefined");
+    return ThrowTypeError("uid required");
+  if (!info[1]->IsString() && !info[1]->IsUndefined())
+    return ThrowTypeError("uid must be a string or undefined");
   if (argc < 3)
-    return THROW_TYPE_ERROR("gid required");
-  if (!args[2]->IsString() && !args[2]->IsUndefined())
-    return THROW_TYPE_ERROR("gid must be a string or undefined");
-  if (argc > 3 && !args[3]->IsFunction())
-    return THROW_TYPE_ERROR("callback must be a function");
-  if (args[1]->IsUndefined() && args[2]->IsUndefined())
-    return THROW_TYPE_ERROR("either uid or gid must be defined");
+    return ThrowTypeError("gid required");
+  if (!info[2]->IsString() && !info[2]->IsUndefined())
+    return ThrowTypeError("gid must be a string or undefined");
+  if (argc > 3 && !info[3]->IsFunction())
+    return ThrowTypeError("callback must be a function");
+  if (info[1]->IsUndefined() && info[2]->IsUndefined())
+    return ThrowTypeError("either uid or gid must be defined");
 
-  String::Utf8Value path(args[0]->ToString());
-  String::AsciiValue susid(args[1]->IsString() ?
-    args[1]->ToString() : String::New(""));
-  String::AsciiValue sgsid(args[2]->IsString() ?
-    args[2]->ToString() : String::New(""));
+  String::Utf8Value path(info[0]->ToString());
+  String::Utf8Value susid(info[1]->IsString() ?
+    info[1]->ToString() : EmptyString());
+  String::Utf8Value sgsid(info[2]->IsString() ?
+    info[2]->ToString() : EmptyString());
 
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
-  if (!args[3]->IsFunction()) {
-    DWORD error = chown_sync(*path, *susid, *sgsid);
-    if (error != ERROR_SUCCESS) {
-      return THROW_WINAPI_ERROR(error);
-    }
-    return Undefined();
+  if (!info[3]->IsFunction()) {
+      HandleScope scope;
+    DWORD error = chown_impl(*path, *susid, *sgsid);
+    if (error != ERROR_SUCCESS)
+      return ThrowWinapiError(error);
+    return info.GetReturnValue().Set(Undefined());
   }
 
-  // prepare parameters for the method_sync to be called later
-  // from the method_async called from the worker thread
-  CppObj<async_data_t *> async_data = new async_data_t(
-    Local<Function>::Cast(args[3]));
-  async_data->operation = OPERATION_CHOWN;
-  async_data->path = HeapStrDup(HeapBase::ProcessHeap(), *path);
-  if (!async_data->path.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-  async_data->susid = LocalStrDup(*sgsid);
-  if (!async_data->susid.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-  async_data->sgsid = LocalStrDup(*susid);
-  if (!async_data->sgsid.IsValid()) {
-    return THROW_LAST_WINAPI_ERROR;
-  }
-
-  // queue the method_async to be called when posibble and
-  // after_async to send its result to the external callback
-  uv_queue_work(uv_default_loop(), &async_data->request,
-    chown_async, (uv_after_work_cb) after_async);
-
-  async_data.Detach();
-  return Undefined();
+  // prepare parameters for the method_impl to be called later;
+  // queue the worker to be called when posibble and send its
+  // result to the external callback
+  Callback * callback = new Callback(info[1].As<Function>());
+  AsyncQueueWorker(new chown_worker(callback, *path, *susid, *sgsid));
 }
 
 // exposes methods implemented by this sub-package and initializes the
 // string symbols for the converted resulting object literals; to be
 // called from the add-on module-initializing function
-void init(Handle<Object> target) {
-  HandleScope scope;
-
-  NODE_SET_METHOD(target, "fgetown", fgetown_impl);
-  NODE_SET_METHOD(target, "getown", getown_impl);
-  NODE_SET_METHOD(target, "fchown", fchown_impl);
-  NODE_SET_METHOD(target, "chown", chown_impl);
-
-  uid_symbol = NODE_PSYMBOL("uid");
-  gid_symbol = NODE_PSYMBOL("gid");
+NAN_MODULE_INIT(init) {
+  NAN_EXPORT(target, fgetown);
+  NAN_EXPORT(target, getown);
+  NAN_EXPORT(target, fchown);
+  NAN_EXPORT(target, chown);
 }
 
 } // namespace fs_win
-
-#endif // _WIN32

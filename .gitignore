@@ -4,6 +4,7 @@ build
 pids
 logs
 results
+/tmp-test-fs
 *~
 *.seed
 *.log

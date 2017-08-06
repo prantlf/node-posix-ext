@@ -1,5 +1,3 @@
-#ifdef _WIN32
-
 #include "winwrap.h"
 #include "autores.h"
 
@@ -84,5 +82,3 @@ LPSTR HeapStrWideToUtf8(HANDLE heap, LPWSTR source) {
   }
   return target.Detach();
 }
-
-#endif // _WIN32
