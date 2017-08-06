@@ -1,3 +1,4 @@
+sudo: false
 language: node_js
 cache:
   directories:
@@ -22,8 +23,8 @@ addons:
       - g++-4.8
 before_script:
   - npm prune
-after_success:
-  - npm run semantic-release
-branches:
-  except:
-    - /^v\d+\.\d+\.\d+$/
+#after_success:
+#  - npm run semantic-release
+#branches:
+#  except:
+#    - /^v\d+\.\d+\.\d+$/

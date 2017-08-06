@@ -1,6 +1,6 @@
 {
   "name": "posix-ext",
-  "version": "0.0.0-development",
+  "version": "0.2.1",
   "description": "A drop-in replacement for the Node.js modules process, fs and posix providing their POSIX functionality on both POSIX and Windows platforms.",
   "homepage": "https://github.com/prantlf/node-posix-ext/",
   "author": {
