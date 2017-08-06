@@ -81,10 +81,17 @@ static DWORD resolve_name(LPCSTR name, PSID * id) {
   assert(name != NULL);
   assert(id != NULL);
 
+  // convert UTF-8 source to UTF-16 to be able to use wide-character
+  // Win32 API, which can handle names with any characters inside
+  HeapMem<LPWSTR> wname = HeapStrUtf8ToWide(HeapBase::ProcessHeap(), name);
+  if (!wname.IsValid()) {
+    return GetLastError();
+  }
+
   // get sizes of buffers to accomodate the domain name and SID
   DWORD szsid = 0, szdomain = 0;
   SID_NAME_USE sidtype = SidTypeUnknown;
-  if (LookupAccountName(NULL, name, NULL, &szsid,
+  if (LookupAccountNameW(NULL, wname, NULL, &szsid,
       NULL, &szdomain, &sidtype) != FALSE) {
     return ERROR_INVALID_FUNCTION;
   }
@@ -99,14 +106,15 @@ static DWORD resolve_name(LPCSTR name, PSID * id) {
     return GetLastError();
   }
   // allocate the buffer for the source domain
-  HeapMem<LPSTR> domain = HeapMem<LPSTR>::Allocate(szdomain);
+  HeapMem<LPWSTR> domain = HeapMem<LPWSTR>::Allocate(
+    szdomain * sizeof(WCHAR));
   if (!domain.IsValid()) {
     return GetLastError();
   }
 
   // get the SID and the source domain name; the latter is not needed
   // but it is always returned
-  if (LookupAccountName(NULL, name, sid, &szsid,
+  if (LookupAccountNameW(NULL, wname, sid, &szsid,
       domain, &szdomain, &sidtype) == FALSE) {
     return GetLastError();
   }
@@ -129,7 +137,7 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
   // get sizes of buffers to accomodate domain and account names
   DWORD szaccount = 0, szdomain = 0;
   SID_NAME_USE sidtype = SidTypeUnknown;
-  if (LookupAccountSid(NULL, gsid, NULL, &szaccount,
+  if (LookupAccountSidW(NULL, gsid, NULL, &szaccount,
       NULL, &szdomain, &sidtype) != FALSE) {
     return ERROR_INVALID_FUNCTION;
   }
@@ -140,19 +148,21 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
 
   // allocate the buffer for both domain and account names; they
   // will be formatted "domain\account"
-  group.name = HeapMem<LPSTR>::Allocate(szaccount + szdomain);
-  if (!group.name.IsValid()) {
+  HeapMem<LPWSTR> name = HeapMem<LPWSTR>::Allocate(
+    (szdomain + szaccount) * sizeof(WCHAR));
+  if (!name.IsValid()) {
     return GetLastError();
   }
 
   // declare pointers to buffers for domain and account names (including
   // the terminating zero characters), both in the same continguous buffer
-  LPSTR domainpart = group.name;
-  LPSTR accountpart = domainpart + szdomain;
+  LPWSTR domainpart = name;
+  LPWSTR accountpart = domainpart + szdomain;
+
   // fill the buffers with the requested information; both domain
   // and account names are ended by zero characters; it divides them,
   // as long as they are needed separate
-  if (LookupAccountSid(NULL, gsid, accountpart, &szaccount,
+  if (LookupAccountSidW(NULL, gsid, accountpart, &szaccount,
       domainpart, &szdomain, &sidtype) == FALSE) {
     return GetLastError();
   }
@@ -163,9 +173,9 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
   }
 
   // get the NetBIOS name of the current computer
-  CHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+  WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
   DWORD szcomputer = MAX_COMPUTERNAME_LENGTH + 1;
-  if (GetComputerName(computer, &szcomputer) == FALSE) {
+  if (GetComputerNameW(computer, &szcomputer) == FALSE) {
     return GetLastError();
   }
 
@@ -173,26 +183,30 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
   // Users group reported this way, because the machine is in a domain;
   // replace the name with "<computer name>\Users" and update all related
   // variables: domainpart, szdomain, accountpart and szaccount
-  if (stricmp(accountpart, "None") == 0 &&
-      stricmp(domainpart, computer) == 0) {
+  if (_wcsicmp(accountpart, L"None") == 0 &&
+      _wcsicmp(domainpart, computer) == 0) {
       // the domain name is the NetBIOS name of this computer
       szdomain = szcomputer;
       // the account name is "Users"
       szaccount = 5;
       // allocate a new buffer with the size of the domain name,
       // the account name, backslash and the terminating zero character
-      group.name = HeapMem<LPSTR>::Allocate(szdomain + szaccount + 2);
+      name = HeapMem<LPWSTR>::Allocate(
+        (szdomain + szaccount + 2) * sizeof(WCHAR));
+      if (!name.IsValid()) {
+        return GetLastError();
+      }
       // the domain part is the first in the group name
-      domainpart = group.name;
+      domainpart = name;
       // the account part starts behind the terminating zero character
       // of the group name part, in the same continguous buffer
       accountpart = domainpart + szdomain + 1;
       // copy the computer name including the dividing zero character;
       // it will divide the domain and account names, as long as they
       // are needed separate
-      CopyMemory(domainpart, computer, szcomputer + 1);
+      CopyMemory(domainpart, computer, (szcomputer + 1) * sizeof(WCHAR));
       // copy the member name including the terminating zero character
-      CopyMemory(accountpart, "Users", 6);
+      CopyMemory(accountpart, L"Users", 6 * sizeof(WCHAR));
   }
 
   // the domain part can be ampty, equal to "BUILTIN" or equal to this
@@ -201,11 +215,9 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
   // store it in a UTF-16 buffer for the enquiring API
   NetApiBuffer<LPWSTR> wdcname;
   LPWSTR wserver = NULL;
-  if (szdomain > 0 && stricmp(domainpart, "BUILTIN") != 0 &&
-      stricmp(domainpart, computer) != 0) {
-    HeapMem<LPWSTR> wdomain = HeapStrUtf8ToWide(
-      HeapBase::ProcessHeap(), domainpart);
-    error = NetGetDCName(NULL, wdomain, (LPBYTE *) &wdcname);
+  if (szdomain > 0 && _wcsicmp(domainpart, L"BUILTIN") != 0 &&
+      _wcsicmp(domainpart, computer) != 0) {
+    error = NetGetDCName(NULL, domainpart, (LPBYTE *) &wdcname);
     if (error == NERR_Success) {
       // the server name is returned prefixed by "\\", which is not
       // expected by the later used enquiring API
@@ -215,29 +227,13 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
     }
   }
 
-  // convert the account name to UTF-16 for the enquiring API
-  HeapMem<LPWSTR> waccount = HeapStrUtf8ToWide(
-    HeapBase::ProcessHeap(), accountpart);
-  if (!waccount.IsValid()) {
-    return GetLastError();
-  }
-
-  // from here on we won't need separate domain and account names;
-  // replace the domain terminating zero character by backslash,
-  // achieving the desired output: "<domain>\<account>"
-  if (szdomain > 0) {
-    domainpart[szdomain] = '\\';
-  } else {
-    MoveMemory(domainpart, accountpart, szaccount + 1);
-  }
-
   // groups specified by complete SIDs can be domain SIDs and should
   // be enquired about by NetGroupGetUsers
   if (sidtype == SidTypeGroup || sidtype == SidTypeAlias) {
     if (wserver != NULL) {
       NetApiBuffer<PGROUP_USERS_INFO_0> users;
       DWORD read = 0, total = 0;
-      error = NetGroupGetUsers(wserver, waccount, 0, (LPBYTE *) &users,
+      error = NetGroupGetUsers(wserver, accountpart, 0, (LPBYTE *) &users,
         MAX_PREFERRED_LENGTH, &read, &total, NULL);
       if (error == ERROR_ACCESS_DENIED) {
         // the current user may not have enough rights to enquire about
@@ -247,6 +243,14 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
         return error;
       }
       if (read > 0) {
+        // convert the domain part to UTF-8 to be able to prepend it
+        // to member names computed below
+        HeapMem<LPSTR> domain = HeapStrWideToUtf8(
+          HeapBase::ProcessHeap(), domainpart);
+        if (!domain.IsValid()) {
+          return GetLastError();
+        }
+        int domainlen = strlen(domain);
         // copy the member names to UTF-8 strings; however, members 
         // from the same domain are returned without the "domain\"
         // prefix, so add it to have the consistent output
@@ -254,6 +258,9 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
         for (DWORD i = 0; i < read; ++i) {
           HeapMem<LPSTR> member = HeapStrWideToUtf8(HeapBase::ProcessHeap(),
             users[i].grui0_name);
+          if (!member.IsValid()) {
+            return GetLastError();
+          }
           // if the member name has the "domain\account" format, take it
           if (szdomain == 0 || strchr(member, '\\') != NULL) {
             group.members[i] = member;
@@ -263,14 +270,15 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
             // backslash and the terminating zero character
             size_t szmember = strlen(member);
             HeapMem<LPSTR> fullmember = HeapMem<LPSTR>::Allocate(
-              szdomain + szmember + 2);
+              domainlen + szmember + 2);
             if (!fullmember.IsValid()) {
               return GetLastError();
             }
             // copy the domain name including the dividing backslash
-            CopyMemory(fullmember, domainpart, szdomain + 1);
+            CopyMemory(fullmember, domain, domainlen);
+            fullmember[domainlen] = '\\';
             // copy the member name including the terminating zero character
-            CopyMemory(fullmember + szdomain + 1, member, szmember + 1);
+            CopyMemory(fullmember + domainlen + 1, member, szmember + 1);
             group.members[i] = fullmember;
           }
         }
@@ -280,8 +288,8 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
     } else {
       NetApiBuffer<PLOCALGROUP_MEMBERS_INFO_3> members;
       DWORD read = 0, total = 0;
-      error = NetLocalGroupGetMembers(wserver, waccount, 3, (LPBYTE *) &members,
-        MAX_PREFERRED_LENGTH, &read, &total, NULL);
+      error = NetLocalGroupGetMembers(wserver, accountpart, 3,
+        (LPBYTE *) &members, MAX_PREFERRED_LENGTH, &read, &total, NULL);
       if (error == ERROR_ACCESS_DENIED) {
         // the current user may not have enough rights to enquire about
         // the group; it is not an error; the members will be empty
@@ -289,21 +297,43 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
       } else if (error != NERR_Success) {
         return error;
       }
-      if (read >30) {
+      if (read > 0) {
         // copy the member names to UTF-8 strings; they are in the format
         // "domain\account" returned by the NetLocalGroupGetMembers already
         group.members.Resize(read);
         for (DWORD i = 0; i < read; ++i) {
           group.members[i] = HeapStrWideToUtf8(HeapBase::ProcessHeap(),
             members[i].lgrmi3_domainandname);
+          if (!group.members[i].IsValid()) {
+            return GetLastError();
+          }
         }
       }
     }
   }
 
+  // from here on we won't need separate domain and account names;
+  // replace the domain terminating zero character by backslash,
+  // achieving the desired output: "<domain>\<account>"
+  if (szdomain > 0) {
+    domainpart[szdomain] = L'\\';
+  } else {
+    MoveMemory(domainpart, accountpart, (szaccount + 1) * sizeof(WCHAR));
+  }
+
+  // allocate the buffer for both domain and account names; they
+  // will be formatted "domain\account"
+  group.name = HeapStrWideToUtf8(HeapBase::ProcessHeap(), name);
+  if (!group.name.IsValid()) {
+    return GetLastError();
+  }
+
   // groups do not have passwords on Windows; return the placeholder
   // character used on Linux when the password is not known
   group.passwd = HeapStrDup(HeapBase::ProcessHeap(), "x");
+  if (!group.passwd.IsValid()) {
+    return GetLastError();
+  }
 
   return ERROR_SUCCESS;
 }
@@ -321,7 +351,7 @@ static DWORD resolve_user(user_t & user, PSID usid) {
   // get sizes of buffers to accomodate domain and account names
   DWORD szaccount = 0, szdomain = 0;
   SID_NAME_USE sidtype = SidTypeUnknown;
-  if (LookupAccountSid(NULL, usid, NULL, &szaccount,
+  if (LookupAccountSidW(NULL, usid, NULL, &szaccount,
       NULL, &szdomain, &sidtype) != FALSE) {
     return ERROR_INVALID_FUNCTION;
   }
@@ -332,19 +362,21 @@ static DWORD resolve_user(user_t & user, PSID usid) {
 
   // allocate the buffer for both domain and account names; they
   // will be formatted "domain\account"
-  user.name = HeapMem<LPSTR>::Allocate(szaccount + szdomain);
-  if (!user.name.IsValid()) {
+  HeapMem<LPWSTR> name = HeapMem<LPWSTR>::Allocate(
+    (szdomain + szaccount) * sizeof(WCHAR));
+  if (!name.IsValid()) {
     return GetLastError();
   }
 
   // declare pointers to buffers for domain and account names (including
   // the terminating zero characters), both in the same continguous buffer
-  LPSTR domainpart = user.name;
-  LPSTR accountpart = domainpart + szdomain;
+  LPWSTR domainpart = name;
+  LPWSTR accountpart = domainpart + szdomain;
+
   // fill the buffers with the requested information; both domain
   // and account names are ended by zero characters; it divides them,
   // as long as they are needed separate
-  if (LookupAccountSid(NULL, usid, accountpart, &szaccount,
+  if (LookupAccountSidW(NULL, usid, accountpart, &szaccount,
       domainpart, &szdomain, &sidtype) == FALSE) {
     return GetLastError();
   }
@@ -354,9 +386,9 @@ static DWORD resolve_user(user_t & user, PSID usid) {
   }
 
   // get the NetBIOS name of the current computer
-  CHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
+  WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1];
   DWORD szcomputer = MAX_COMPUTERNAME_LENGTH + 1;
-  if (GetComputerName(computer, &szcomputer) == FALSE) {
+  if (GetComputerNameW(computer, &szcomputer) == FALSE) {
     return GetLastError();
   }
 
@@ -365,10 +397,8 @@ static DWORD resolve_user(user_t & user, PSID usid) {
   // the specified user; store it in a UTF-16 buffer for the enquiring API
   NetApiBuffer<LPWSTR> wdcname;
   LPWSTR wserver = NULL;
-  if (stricmp(domainpart, computer) != 0) {
-    HeapMem<LPWSTR> wdomain = HeapStrUtf8ToWide(
-      HeapBase::ProcessHeap(), domainpart);
-    error = NetGetDCName(NULL, wdomain, (LPBYTE *) &wdcname);
+  if (_wcsicmp(domainpart, computer) != 0) {
+    error = NetGetDCName(NULL, domainpart, (LPBYTE *) &wdcname);
     if (error == NERR_Success) {
       // the server name is returned prefixed by "\\", which is not
       // expected by the later used enquiring API
@@ -378,25 +408,9 @@ static DWORD resolve_user(user_t & user, PSID usid) {
     }
   }
 
-  // convert the account name to UTF-16 for the enquiring API
-  HeapMem<LPWSTR> waccount = HeapStrUtf8ToWide(
-    HeapBase::ProcessHeap(), accountpart);
-  if (!waccount.IsValid()) {
-    return GetLastError();
-  }
-
-  // from here on we won't need separate domain and account names;
-  // replace the domain terminating zero character by backslash,
-  // achieving the desired output: "<domain>\<account>"
-  if (szdomain > 0) {
-    domainpart[szdomain] = '\\';
-  } else {
-    MoveMemory(domainpart, accountpart, szaccount + 1);
-  }
-
   // get the user information from the computed server
   NetApiBuffer<PUSER_INFO_4> uinfo;
-  error = NetUserGetInfo(wserver, waccount, 4, (LPBYTE *) &uinfo);
+  error = NetUserGetInfo(wserver, accountpart, 4, (LPBYTE *) &uinfo);
   if (error == ERROR_ACCESS_DENIED) {
     return ERROR_SUCCESS;
   } else if (error != NERR_Success) {
@@ -429,6 +443,22 @@ static DWORD resolve_user(user_t & user, PSID usid) {
     ((SID *) gsid.Get())->SubAuthority[count - 1] = uinfo->usri4_primary_group_id;
   }
 
+  // from here on we won't need separate domain and account names;
+  // replace the domain terminating zero character by backslash,
+  // achieving the desired output: "<domain>\<account>"
+  if (szdomain > 0) {
+    domainpart[szdomain] = L'\\';
+  } else {
+    MoveMemory(domainpart, accountpart, (szaccount + 1) * sizeof(WCHAR));
+  }
+
+  // allocate the buffer for both domain and account names; they
+  // will be formatted "domain\account"
+  user.name = HeapStrWideToUtf8(HeapBase::ProcessHeap(), name);
+  if (!user.name.IsValid()) {
+    return GetLastError();
+  }
+
   // convert the primary group SID to string
   if (ConvertSidToStringSid(gsid, &user.gid) == FALSE) {
     return GetLastError();
@@ -439,11 +469,23 @@ static DWORD resolve_user(user_t & user, PSID usid) {
   // character used on Linux when the password is not known
   user.passwd = HeapStrWideToUtf8(HeapBase::ProcessHeap(),
     uinfo->usri4_password != NULL ? uinfo->usri4_password : L"x");
+  if (!user.passwd.IsValid()) {
+    return GetLastError();
+  }
 
   // populate the rest of user information
   user.gecos = HeapStrWideToUtf8(HeapBase::ProcessHeap(), uinfo->usri4_full_name);
+  if (!user.gecos.IsValid()) {
+    return GetLastError();
+  }
   user.shell = HeapStrWideToUtf8(HeapBase::ProcessHeap(), uinfo->usri4_script_path);
+  if (!user.shell.IsValid()) {
+    return GetLastError();
+  }
   user.dir = HeapStrWideToUtf8(HeapBase::ProcessHeap(), uinfo->usri4_home_dir);
+  if (!user.dir.IsValid()) {
+    return GetLastError();
+  }
 
   return ERROR_SUCCESS;
 }

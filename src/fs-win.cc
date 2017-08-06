@@ -273,9 +273,16 @@ static int getown_impl(LPCSTR path, LPSTR *uid, LPSTR *gid) {
   assert(uid != NULL);
   assert(gid != NULL);
 
+  // convert UTF-8 source to UTF-16 to be able to use wide-character
+  // Win32 API, which can handle paths with any characters inside
+  HeapMem<LPWSTR> wpath = HeapStrUtf8ToWide(HeapBase::ProcessHeap(), path);
+  if (!wpath.IsValid()) {
+    return GetLastError();
+  }
+
   PSID usid = NULL, gsid = NULL;
   LocalMem<PSECURITY_DESCRIPTOR> sd;
-  DWORD error = GetNamedSecurityInfo((LPSTR) path, SE_FILE_OBJECT,
+  DWORD error = GetNamedSecurityInfoW(wpath, SE_FILE_OBJECT,
     OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
     &usid, &gsid, NULL, NULL, &sd);
   if (error != ERROR_SUCCESS) {
@@ -567,21 +574,28 @@ static int chown_impl(LPCSTR path, LPCSTR uid, LPCSTR gid) {
     return error;
   }
 
+  // convert UTF-8 source to UTF-16 to be able to use wide-character
+  // Win32 API, which can handle paths with any characters inside
+  HeapMem<LPWSTR> wpath = HeapStrUtf8ToWide(HeapBase::ProcessHeap(), path);
+  if (!wpath.IsValid()) {
+    return GetLastError();
+  }
+
   // take ownership of the object specified by its path
   if (*uid && *gid) {
-    if (SetNamedSecurityInfo(const_cast<LPSTR>(path), SE_FILE_OBJECT,
+    if (SetNamedSecurityInfoW(wpath, SE_FILE_OBJECT,
           OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
           usid, gsid, NULL, NULL) != ERROR_SUCCESS) {
       return GetLastError();
     }
   } else if (*uid) {
-    if (SetNamedSecurityInfo(const_cast<LPSTR>(path),
+    if (SetNamedSecurityInfoW(wpath,
           SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, 
           usid, gsid, NULL, NULL) != ERROR_SUCCESS) {
       return GetLastError();
     }
   } else if (*gid) {
-    if (SetNamedSecurityInfo(const_cast<LPSTR>(path),
+    if (SetNamedSecurityInfoW(wpath,
           SE_FILE_OBJECT, GROUP_SECURITY_INFORMATION,
           NULL, gsid, NULL, NULL) != ERROR_SUCCESS) {
       return GetLastError();

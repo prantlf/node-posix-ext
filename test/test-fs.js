@@ -1,30 +1,32 @@
-// tests the fs methods stat and chown
-"use strict";
-var assert = require('assert'),
-    path = require("path"),
-    posix = require("../lib/posix-ext"),
+// tests the posix.fs methods stat and chown
+'use strict';
+var expect = require('chai').expect,
+    path = require('path'),
+    posix = require('../lib/posix-ext'),
     process = posix.process,
     fs = posix.fs,
-    space = "tmp-test-fs",
-    uname, gname, uid, gid, stats;
+    space = 'tmp-test-fs',
+    uname, gname, uid, gid, wname, wid, permitted;
 
 // test with an always available administrative user and group
-uname = process.platform.match(/^win/i) ? "Guest" : "nobody";
+uname = process.platform.match(/^win/i) ? 'Guest' : 'nobody';
 uid = posix.getpwnam(uname).uid;
-gname = process.platform.match(/^win/i) ? "Guests" : "nogroup";
+gname = process.platform.match(/^win/i) ? 'Guests' : 'nogroup';
 gid = posix.getgrnam(gname).gid;
+wname = process.platform.match(/^win/i) ? 'BUILTIN\\Administrators' : 'root';
+wid = posix.getgrnam(wname).gid;
 
 function setUp() {
   fs.mkdirSync(space);
-  var fd = fs.openSync(space + "/file", "w");
+  var fd = fs.openSync(space + '/file', 'w');
   fs.closeSync(fd);
-  var fpath = fs.realpathSync(space + "/file");
-  fs.symlinkSync(fpath, space + "/file_link");
-  fs.chownSync(space + "/file", uid, gid);
-  fs.mkdirSync(space + "/directory");
-  fpath = fs.realpathSync(space + "/directory");
-  fs.symlinkSync(fpath, space + "/directory_link");
-  fs.chownSync(space + "/directory", uid, gid);
+  var fpath = fs.realpathSync(space + '/file');
+  fs.symlinkSync(fpath, space + '/file_link');
+  fs.chownSync(space + '/file', uid, gid);
+  fs.mkdirSync(space + '/directory');
+  fpath = fs.realpathSync(space + '/directory');
+  fs.symlinkSync(fpath, space + '/directory_link');
+  fs.chownSync(space + '/directory', uid, gid);
 }
 
 function tearDown() {
@@ -46,91 +48,175 @@ function tearDown() {
 try {
   tearDown();
   setUp();
+  permitted = describe;
 } catch (error) {
-  if (error.code == "EPERM") {
-    console.warn("  no permission to perform chown; ignoring the tests");
-    return;
-  } else {
+  if (error.code != 'EPERM') {
     throw error;
   }
+  permitted = describe.skip;
 }
 
-// check the testing file
-stats = fs.statSync(space + "/file");
-assert.ok(stats.isFile());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.stat(space + "/file", function (error, stats) {
-  assert.ok(stats.isFile());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
-stats = fs.lstatSync(space + "/file");
-assert.ok(stats.isFile());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.lstat(space + "/file", function (error, stats) {
-  assert.ok(stats.isFile());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
+describe('fs', function () {
+  before(function () {
+    expect(posix).to.be.an('object');
+    this.fs = posix.fs;
+  });
 
-// check that the testing file link resolves automatically
-stats = fs.statSync(space + "/file_link");
-assert.ok(stats.isFile());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.stat(space + "/file_link", function (error, stats) {
-  assert.ok(stats.isFile());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
-// check the testing file link without the automatic resolution
-stats = fs.lstatSync(space + "/file_link");
-assert.notEqual(stats.uid, uid);
-assert.notEqual(stats.gid, gid);
-fs.lstat(space + "/file_link", function (error, stats) {
-  assert.ok(stats.isSymbolicLink());
-  assert.notEqual(stats.uid, uid);
-  assert.notEqual(stats.gid, gid);
-});
+  it('is exposed as an object', function () {
+    // the fs object is exposed and the stat method method
+    // is available on all platforms
+    expect(this.fs).to.be.an('object');
+  });
 
-// check the testing directory
-stats = fs.statSync(space + "/directory");
-assert.ok(stats.isDirectory());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.stat(space + "/directory", function (error, stats) {
-  assert.ok(stats.isDirectory());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
-stats = fs.lstatSync(space + "/directory");
-assert.ok(stats.isDirectory());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.lstat(space + "/directory", function (error, stats) {
-  assert.ok(stats.isDirectory());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
+  it('exposes statSync', function () {
+    expect(this.fs.statSync).to.be.a('function');
+  });
 
-// check that the testing directory link resolves automatically
-stats = fs.statSync(space + "/directory_link");
-assert.ok(stats.isDirectory());
-assert.strictEqual(stats.uid, uid);
-assert.strictEqual(stats.gid, gid);
-fs.stat(space + "/directory_link", function (error, stats) {
-  assert.ok(stats.isDirectory());
-  assert.strictEqual(stats.uid, uid);
-  assert.strictEqual(stats.gid, gid);
-});
-// check the testing directory link without the automatic resolution
-stats = fs.lstatSync(space + "/directory_link");
-assert.notEqual(stats.uid, uid);
-assert.notEqual(stats.gid, gid);
-fs.lstat(space + "/directory_link", function (error, stats) {
-  assert.ok(stats.isSymbolicLink());
-  assert.notEqual(stats.uid, uid);
-  assert.notEqual(stats.gid, gid);
+  permitted('statSync', function () {
+    it('checks a file with link resolution', function () {
+      var stats = this.fs.statSync(space + '/file');
+      expect(stats.isFile()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+
+    it('checks a directory with link resolution', function () {
+      var stats = this.fs.statSync(space + '/directory');
+      expect(stats.isDirectory()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+
+    it('check that a file link resolves automatically', function () {
+      var stats = this.fs.statSync(space + '/file_link');
+      expect(stats.isFile()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+
+    it('check that a directory link resolves automatically', function () {
+      var stats = this.fs.statSync(space + '/directory_link');
+      expect(stats.isDirectory()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+  });
+
+  it('exposes stat', function () {
+    expect(this.fs.stat).to.be.a('function');
+  });
+
+  permitted('stat', function () {
+    it('checks a file with link resolution', function (done) {
+      this.fs.stat(space + '/file', function (error, stats) {
+        expect(stats.isFile()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('checks a directory with link resolution', function (done) {
+      this.fs.stat(space + '/directory', function (error, stats) {
+        expect(stats.isDirectory()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('check that a file link resolves automatically', function (done) {
+      this.fs.stat(space + '/file_link', function (error, stats) {
+        expect(stats.isFile()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('check that a directory link resolves automatically', function (done) {
+      this.fs.stat(space + '/directory_link', function (error, stats) {
+        expect(stats.isDirectory()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+  });
+
+  it('exposes lstatSync', function () {
+    expect(this.fs.lstatSync).to.be.a('function');
+  });
+
+  permitted('lstatSync', function () {
+    it('checks a file without link resolution', function () {
+      var stats = this.fs.lstatSync(space + '/file');
+      expect(stats.isFile()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+
+    it('checks a directory without link resolution', function () {
+      var stats = this.fs.lstatSync(space + '/directory');
+      expect(stats.isDirectory()).to.equal(true);
+      expect(stats.uid).to.equal(uid);
+      expect(stats.gid).to.equal(gid);
+    });
+
+    it('check that a file link does not resolve automatically', function () {
+      var stats = this.fs.lstatSync(space + '/file_link');
+      expect(stats.isSymbolicLink()).to.equal(true);
+      //expect(stats.uid).to.equal(uid);
+      //expect(stats.gid).to.equal(gid);
+    });
+
+    it('check that a directory link does not resolve automatically', function () {
+      var stats = this.fs.lstatSync(space + '/directory_link');
+      expect(stats.isSymbolicLink()).to.equal(true);
+      //expect(stats.uid).to.equal(uid);
+      //expect(stats.gid).to.equal(gid);
+    });
+  });
+
+  it('exposes lstat', function () {
+    expect(this.fs.lstat).to.be.a('function');
+  });
+
+  permitted('lstat', function () {
+    it('checks a file without link resolution', function (done) {
+      this.fs.lstat(space + '/file', function (error, stats) {
+        expect(stats.isFile()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('checks a directory without link resolution', function (done) {
+      this.fs.lstat(space + '/directory', function (error, stats) {
+        expect(stats.isDirectory()).to.equal(true);
+        expect(stats.uid).to.equal(uid);
+        expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('check that a file link does not resolve automatically', function (done) {
+      this.fs.lstat(space + '/file_link', function (error, stats) {
+        expect(stats.isSymbolicLink()).to.equal(true);
+        //expect(stats.uid).to.equal(uid);
+        //expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+
+    it('check that a directory link does not resolve automatically', function (done) {
+      this.fs.lstat(space + '/directory_link', function (error, stats) {
+        expect(stats.isSymbolicLink()).to.equal(true);
+        //expect(stats.uid).to.equal(uid);
+        //expect(stats.gid).to.equal(gid);
+        done();
+      });
+    });
+  });
 });

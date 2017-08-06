@@ -1,6 +1,6 @@
 {
   "name": "posix-ext",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "A drop-in replacement for the Node.js modules process, fs and posix providing their POSIX functionality on both POSIX and Windows platforms.",
   "homepage": "https://github.com/prantlf/node-posix-ext/",
   "author": {
@@ -43,10 +43,12 @@
     "postinstall": "npmpd",
     "configure": "node-gyp configure",
     "build": "node-gyp build",
-    "test": "node test/test-all.js",
+    "test": "mocha",
     "semantic-release": "semantic-release pre && npm publish && semantic-release post"
   },
   "devDependencies": {
+    "chai": "^4.1.1",
+    "mocha": "^3.5.0",
     "node-gyp": "~3.6.2",
     "semantic-release": "^6.3.6"
   },

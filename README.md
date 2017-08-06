@@ -265,6 +265,7 @@ git push origin <branch name>
 
 ## Release History
 
+ * 2017-08-07   v0.3.0   Fix handling of files and users with non-ASCII characters
  * 2017-08-06   v0.2.0   Fix building for recent Node.js versions on Windows
  * 2017-07-29   v0.1.2   Fix building for Node.js versions >= 0.12 and <= 8
  * 2014-01-20   v0.1.1   Fix building with MSVC 2008
