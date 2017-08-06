@@ -3,7 +3,7 @@
 A drop-in replacement for the Node.js modules process, fs and posix
 providing their POSIX functionality on both POSIX and Windows platforms.
 
-[![NPM version](https://badge.fury.io/js/node-posix-ext.png)](http://badge.fury.io/js/node-posix-ext) ![Bower version](https://img.shields.io/bower/v/node-posix-ext.svg) [![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext) [![Dependency Status](https://david-dm.org/prantlf/node-posix-ext.svg)](https://david-dm.org/prantlf/node-posix-ext) [![devDependency Status](https://david-dm.org/prantlf/node-posix-ext/dev-status.svg)](https://david-dm.org/prantlf/node-posix-ext#info=devDependencies) [![Greenkeeper badge](https://badges.greenkeeper.io/prantlf/node-posix-ext.svg)](https://greenkeeper.io/)
+[![NPM version](https://badge.fury.io/js/node-posix-ext.png)](http://badge.fury.io/js/node-posix-ext) [![Build Status](https://api.travis-ci.org/prantlf/node-posix-ext.png)](http://travis-ci.org/prantlf/node-posix-ext) [![Dependency Status](https://david-dm.org/prantlf/node-posix-ext.svg)](https://david-dm.org/prantlf/node-posix-ext) [![devDependency Status](https://david-dm.org/prantlf/node-posix-ext/dev-status.svg)](https://david-dm.org/prantlf/node-posix-ext#info=devDependencies) [![Greenkeeper badge](https://badges.greenkeeper.io/prantlf/node-posix-ext.svg)](https://greenkeeper.io/)
 
 [![NPM Downloads](https://nodei.co/npm/posix-ext.png?downloads=true&downloadRank=true&stars=true)](https://www.npmjs.com/package/posix-ext)[![NPM](https://nodei.co/npm-dl/posix-ext.png?months=6&height=3)](https://nodei.co/npm/posix-ext/)
 
