@@ -142,6 +142,19 @@ the given user. `user` can be specified as a string with a SID.
 
 See `getpwnam` for more information.
 
+### posix.options: object
+
+Exposes flags to control behavior of the methods above.
+
+#### populateGroupMembers: boolean
+
+Disables enumerating of group members to populate the `members` property
+of the group information. If yoiu do not need it and work on a slow domain
+network with a groups with many members, you may turn it off. The value
+it `true` (populating members is enabled) by default.
+
+    posix.options.populateGroupMembers = false;
+
 ## FileSystem Calls on Windows
 
 Every method as also a synchronous alternative. Their names end with the
@@ -265,6 +278,7 @@ git push origin <branch name>
 
 ## Release History
 
+ * 2017-08-07   v0.4.0   Allow disable populating group members
  * 2017-08-07   v0.3.0   Fix handling of files and users with non-ASCII characters
  * 2017-08-06   v0.2.0   Fix building for recent Node.js versions on Windows
  * 2017-07-29   v0.1.2   Fix building for Node.js versions >= 0.12 and <= 8

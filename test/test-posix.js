@@ -10,6 +10,16 @@ describe('posix', function () {
     expect(posix).to.be.an('object');
   });
 
+  it('exposes options', function () {
+    expect(posix.options).to.be.a('object');
+  });
+
+  describe('options', function () {
+    it('enable group member population by default', function () {
+      expect(posix.options.populateGroupMembers).to.equal(true);
+    });
+  });
+
   it('exposes getgrgid', function () {
     expect(posix.getgrgid).to.be.a('function');
   });
@@ -22,7 +32,12 @@ describe('posix', function () {
         expect(posix.process).to.be.equal(process);
       }
       expect(posix.process.getgid).to.be.a('function');
+      posix.options.populateGroupMembers = false;
       this.group = posix.getgrgid(posix.process.getgid());
+    });
+
+    after(function () {
+      posix.options.populateGroupMembers = true;
     });
 
     it('returns name', function () {
@@ -54,7 +69,12 @@ describe('posix', function () {
     before(function () {
       // test with an always available administrative group
       var name = process.platform.match(/^win/i) ? "Administrators" : "root";
+      posix.options.populateGroupMembers = false;
       this.group = posix.getgrnam(name);
+    });
+
+    after(function () {
+      posix.options.populateGroupMembers = true;
     });
 
     it('returns name', function () {

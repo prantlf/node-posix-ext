@@ -32,6 +32,8 @@ using v8::Object;
 using v8::Array;
 using v8::Value;
 using v8::String;
+using Nan::FunctionCallbackInfo;
+using Nan::GetCurrentContext;
 using Nan::AsyncQueueWorker;
 using Nan::AsyncWorker;
 using Nan::Callback;
@@ -41,6 +43,7 @@ using Nan::ThrowTypeError;
 using Nan::New;
 using Nan::Null;
 using Nan::Undefined;
+using Nan::Get;
 using Nan::Set;
 using namespace autores;
 
@@ -125,7 +128,8 @@ static DWORD resolve_name(LPCSTR name, PSID * id) {
 }
 
 // completes the group information using the gid (SID) member of it
-static DWORD resolve_group(group_t & group, PSID gsid) {
+static DWORD resolve_group(group_t & group, PSID gsid,
+                           bool populateGroupMembers) {
   assert(gsid != NULL);
 
   // convert the input SID to string; although the string could be the
@@ -209,27 +213,27 @@ static DWORD resolve_group(group_t & group, PSID gsid) {
       CopyMemory(accountpart, L"Users", 6 * sizeof(WCHAR));
   }
 
-  // the domain part can be ampty, equal to "BUILTIN" or equal to this
-  // computer name; in these cases, the group is a local one, otherwise
-  // we need to know the domain controller to enquire about it;
-  // store it in a UTF-16 buffer for the enquiring API
-  NetApiBuffer<LPWSTR> wdcname;
-  LPWSTR wserver = NULL;
-  if (szdomain > 0 && _wcsicmp(domainpart, L"BUILTIN") != 0 &&
-      _wcsicmp(domainpart, computer) != 0) {
-    error = NetGetDCName(NULL, domainpart, (LPBYTE *) &wdcname);
-    if (error == NERR_Success) {
-      // the server name is returned prefixed by "\\", which is not
-      // expected by the later used enquiring API
-      wserver = wdcname + 2;
-    } else if (error != NERR_DCNotFound) {
-      return error;
-    }
-  }
-
   // groups specified by complete SIDs can be domain SIDs and should
   // be enquired about by NetGroupGetUsers
-  if (sidtype == SidTypeGroup || sidtype == SidTypeAlias) {
+  if (populateGroupMembers &&
+      (sidtype == SidTypeGroup || sidtype == SidTypeAlias)) {
+    // the domain part can be ampty, equal to "BUILTIN" or equal to this
+    // computer name; in these cases, the group is a local one, otherwise
+    // we need to know the domain controller to enquire about it;
+    // store it in a UTF-16 buffer for the enquiring API
+    NetApiBuffer<LPWSTR> wdcname;
+    LPWSTR wserver = NULL;
+    if (szdomain > 0 && _wcsicmp(domainpart, L"BUILTIN") != 0 &&
+        _wcsicmp(domainpart, computer) != 0) {
+      error = NetGetDCName(NULL, domainpart, (LPBYTE *) &wdcname);
+      if (error == NERR_Success) {
+        // the server name is returned prefixed by "\\", which is not
+        // expected by the later used enquiring API
+        wserver = wdcname + 2;
+      } else if (error != NERR_DCNotFound) {
+        return error;
+      }
+    }
     if (wserver != NULL) {
       NetApiBuffer<PGROUP_USERS_INFO_0> users;
       DWORD read = 0, total = 0;
@@ -554,12 +558,26 @@ static Local<Value> convert_user(user_t const & user) {
   return result;
 }
 
+static bool shall_populate_group_members(
+    FunctionCallbackInfo<Value> const & info) {
+  HandleScope scope;
+  Local<Value> posix = info.Holder();
+  assert(posix->IsObject());
+  Local<Value> options = Get(posix->ToObject(),
+    New<String>("options").ToLocalChecked())
+    .ToLocalChecked()->ToObject();
+  assert(options->IsObject());
+  return Get(options->ToObject(),
+    New<String>("populateGroupMembers").ToLocalChecked())
+    .ToLocalChecked()->BooleanValue();
+}
+
 // --------------------------------------------------
 // getgrgid - gets group information for a group SID:
 // { name, passwd, gid, members }  getgrgid( gid, [callback] )
 
 // completes the group information using the gid (string) member of it
-static DWORD getgrgid_impl(group_t & group) {
+static DWORD getgrgid_impl(group_t & group, bool populateGroupMembers) {
   LocalMem<PSID> gsid;
   if (ConvertStringSidToSid(group.gid, &gsid) == FALSE) {
     return GetLastError();
@@ -567,14 +585,15 @@ static DWORD getgrgid_impl(group_t & group) {
 
   group.gid.Dispose();
 
-  return resolve_group(group, gsid);
+  return resolve_group(group, gsid, populateGroupMembers);
 }
 
 // passes input/output parameters between the native method entry point
 // and the worker method doing the work, which is called asynchronously
 class getgrgid_worker : public AsyncWorker {
   public:
-    getgrgid_worker(Callback * callback, LPSTR gid) : AsyncWorker(callback) {
+    getgrgid_worker(Callback * callback, LPSTR gid, bool populateGroupMembers)
+    : AsyncWorker(callback), populateGroupMembers(populateGroupMembers) {
       group.gid = LocalStrDup(gid);
       error = group.gid.IsValid() ? ERROR_SUCCESS : GetLastError();
     }
@@ -584,7 +603,7 @@ class getgrgid_worker : public AsyncWorker {
   // passes the execution to getgrgid_impl
   void Execute() {
     if (error == ERROR_SUCCESS) {
-      error = getgrgid_impl(group);
+      error = getgrgid_impl(group, populateGroupMembers);
     }
   }
 
@@ -622,6 +641,7 @@ class getgrgid_worker : public AsyncWorker {
   }
 
   private:
+    bool populateGroupMembers;
     DWORD error;
     group_t group;
 };
@@ -639,6 +659,7 @@ NAN_METHOD(getgrgid) {
     return ThrowTypeError("callback must be a function");
 
   String::Utf8Value gid(info[0]->ToString());
+  bool populateGroupMembers = shall_populate_group_members(info);
 
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
@@ -648,7 +669,7 @@ NAN_METHOD(getgrgid) {
     group.gid = LocalStrDup(*gid);
     if (!group.gid.IsValid())
       return ThrowLastWinapiError();
-    DWORD error = getgrgid_impl(group);
+    DWORD error = getgrgid_impl(group, populateGroupMembers);
     if (error == ERROR_NONE_MAPPED)
       return info.GetReturnValue().Set(Undefined());
     if (error != ERROR_SUCCESS)
@@ -660,7 +681,8 @@ NAN_METHOD(getgrgid) {
   // queue the worker to be called when posibble and send its
   // result to the external callback
   Callback * callback = new Callback(info[1].As<Function>());
-  AsyncQueueWorker(new getgrgid_worker(callback, *gid));
+  AsyncQueueWorker(new getgrgid_worker(callback, *gid,
+    populateGroupMembers));
 }
 
 // ----------------------------------------------------
@@ -668,20 +690,21 @@ NAN_METHOD(getgrgid) {
 // { name, passwd, gid, members }  getgrnam( name, [callback] )
 
 // completes the group information using the name member of it
-static DWORD getgrnam_impl(group_t & group) {
+static DWORD getgrnam_impl(group_t & group, bool populateGroupMembers) {
   HeapMem<PSID> gsid;
   DWORD error = resolve_name(group.name, &gsid);
   if (error != ERROR_SUCCESS) {
     return error;
   }
-  return resolve_group(group, gsid);
+  return resolve_group(group, gsid, populateGroupMembers);
 }
 
 // passes input/output parameters between the native method entry point
 // and the worker method doing the work, which is called asynchronously
 class getgrnam_worker : public AsyncWorker {
   public:
-    getgrnam_worker(Callback * callback, LPSTR name) : AsyncWorker(callback) {
+    getgrnam_worker(Callback * callback, LPSTR name, bool populateGroupMembers)
+    : AsyncWorker(callback), populateGroupMembers(populateGroupMembers) {
       group.name = HeapStrDup(HeapBase::ProcessHeap(), name);
       error = group.name.IsValid() ? ERROR_SUCCESS : GetLastError();
     }
@@ -691,7 +714,7 @@ class getgrnam_worker : public AsyncWorker {
   // passes the execution to getgrnam_impl
   void Execute() {
     if (error == ERROR_SUCCESS) {
-      error = getgrnam_impl(group);
+      error = getgrnam_impl(group, populateGroupMembers);
     }
   }
 
@@ -729,6 +752,7 @@ class getgrnam_worker : public AsyncWorker {
   }
 
   private:
+    bool populateGroupMembers;
     DWORD error;
     group_t group;
 };
@@ -746,6 +770,7 @@ NAN_METHOD(getgrnam) {
     return ThrowTypeError("callback must be a function");
 
   String::Utf8Value name(info[0]->ToString());
+  bool populateGroupMembers = shall_populate_group_members(info);
 
   // if no callback was provided, assume the synchronous scenario,
   // call the method_sync immediately and return its results
@@ -755,7 +780,7 @@ NAN_METHOD(getgrnam) {
     group.name = HeapStrDup(HeapBase::ProcessHeap(), *name);
     if (!group.name.IsValid())
       return ThrowLastWinapiError();
-    DWORD error = getgrnam_impl(group);
+    DWORD error = getgrnam_impl(group, populateGroupMembers);
     if (error == ERROR_NONE_MAPPED)
       return info.GetReturnValue().Set(Undefined());
     if (error != ERROR_SUCCESS)
@@ -767,7 +792,8 @@ NAN_METHOD(getgrnam) {
   // queue the worker to be called when posibble and send its
   // result to the external callback
   Callback * callback = new Callback(info[1].As<Function>());
-  AsyncQueueWorker(new getgrnam_worker(callback, *name));
+  AsyncQueueWorker(new getgrnam_worker(callback, *name,
+    populateGroupMembers));
 }
 
 // -------------------------------------------------
