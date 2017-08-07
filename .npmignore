@@ -1,4 +1,4 @@
-.git*
+.*
 *.log
 build
 node_modules

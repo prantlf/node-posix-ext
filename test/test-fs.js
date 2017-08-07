@@ -62,6 +62,8 @@ describe('fs', function () {
     this.fs = posix.fs;
   });
 
+  after(tearDown);
+
   it('is exposed as an object', function () {
     // the fs object is exposed and the stat method method
     // is available on all platforms
