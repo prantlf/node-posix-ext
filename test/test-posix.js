@@ -16,7 +16,11 @@ describe('posix', function () {
 
   describe('getgrgid', function () {
     before(function () {
-      expect(posix.process).to.be.equal(process);
+      if (process.platform.match(/^win/i)) {
+        expect(posix.process).to.be.an('object');
+      } else {
+        expect(posix.process).to.be.equal(process);
+      }
       expect(posix.process.getgid).to.be.a('function');
       this.group = posix.getgrgid(posix.process.getgid());
     });
@@ -80,7 +84,11 @@ describe('posix', function () {
 
   describe('getpwuid', function () {
     before(function () {
-      expect(posix.process).to.be.equal(process);
+      if (process.platform.match(/^win/i)) {
+        expect(posix.process).to.be.an('object');
+      } else {
+        expect(posix.process).to.be.equal(process);
+      }
       expect(posix.process.getuid).to.be.a('function');
       this.user = posix.getpwuid(posix.process.getuid());
     });

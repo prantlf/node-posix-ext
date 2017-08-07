@@ -12,7 +12,11 @@ describe('process', function () {
   it('is exposed as an object', function () {
     // the process object is exposed and the getgid method
     // is available on all platforms
-    expect(this.process).to.be.equal(process);
+    if (process.platform.match(/^win/i)) {
+      expect(this.process).to.be.an('object');
+    } else {
+      expect(this.process).to.be.equal(process);
+    }
   });
 
   it('exposes getgid', function () {
