@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "bindings": "~1.3.0",
-    "nan": "~2.7.0",
+    "nan": "~2.8.0",
     "npm-platform-dependencies": "~0.0.13"
   },
   "darwinDependencies": {
