@@ -36,7 +36,7 @@
   ],
   "main": "./lib/posix-ext",
   "engines": {
-    "node": ">= 0.10.0"
+    "node": ">= 4"
   },
   "gypfile": true,
   "scripts": {

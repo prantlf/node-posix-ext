@@ -6,11 +6,9 @@ cache:
 notifications:
   email: true
 node_js:
-  - "0.10"
-  - "0.12"
-  - "4"
-  - "6"
   - "8"
+  - "6"
+  - "4"
 python:
   - "2.7"
 env:
