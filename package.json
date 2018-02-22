@@ -55,7 +55,7 @@
   "dependencies": {
     "bindings": "~1.3.0",
     "nan": "~2.8.0",
-    "npm-platform-dependencies": "~0.0.13",
+    "npm-platform-dependencies": "~0.1.0",
     "posix": "~4.1.1"
   },
   "darwinDependencies": {
