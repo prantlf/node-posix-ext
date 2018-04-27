@@ -44,19 +44,21 @@
     "configure": "node-gyp configure",
     "build": "node-gyp build",
     "test": "mocha --timeout 10000",
-    "semantic-release": "semantic-release"
+    "semantic-release": "semantic-release",
+    "travis-deploy-once": "travis-deploy-once"
   },
   "devDependencies": {
     "chai": "^4.1.2",
-    "mocha": "^4.0.1",
+    "mocha": "^5.1.1",
     "node-gyp": "~3.6.2",
-    "semantic-release": "^15.0.0"
+    "semantic-release": "^15.1.7",
+    "travis-deploy-once": "^4.4.1"
   },
   "dependencies": {
     "bindings": "~1.3.0",
     "nan": "~2.10.0",
     "npm-platform-dependencies": "~0.1.0",
-    "posix": "~4.1.1"
+    "posix": "^4.1.1"
   },
   "darwinDependencies": {
     "posix": "~4.1.1"

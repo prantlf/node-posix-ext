@@ -237,7 +237,7 @@ Output of the `example/example-whoami.js` run on Windows:
 
 ## Build
 
-Make sure that you have [NodeJS] >= 0.10 and the global NPM module `node-gyp`
+Make sure that you have [NodeJS] >= 4 and the global NPM module `node-gyp`
 installed. Clone the Github repository to a local directory and enter it.
 Install the package dependencies, build and test.
 
@@ -278,6 +278,7 @@ git push origin <branch name>
 
 ## Release History
 
+ * 2018-04-27   v0.4.5   Upgrade NPM module dependencies
  * 2017-08-07   v0.4.0   Allow disable populating group members
  * 2017-08-07   v0.3.0   Fix handling of files and users with non-ASCII characters
  * 2017-08-06   v0.2.0   Fix building for recent Node.js versions on Windows
@@ -287,6 +288,6 @@ git push origin <branch name>
 
 ## License
 
-Copyright (c) 2013-2017 Ferdinand Prantl
+Copyright (c) 2013-2018 Ferdinand Prantl
 
 Licensed under the MIT license.
