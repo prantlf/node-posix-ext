@@ -51,7 +51,7 @@
     "chai": "^4.1.2",
     "mocha": "^5.1.1",
     "node-gyp": "~3.6.2",
-    "semantic-release": "^15.1.7",
+    "semantic-release": "^15.5.2",
     "travis-deploy-once": "^5.0.0"
   },
   "dependencies": {
